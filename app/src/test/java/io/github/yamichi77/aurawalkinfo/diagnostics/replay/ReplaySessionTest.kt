@@ -1,12 +1,19 @@
 package io.github.yamichi77.aurawalkinfo.diagnostics.replay
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.location.AddressParts
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
+import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.SessionMetrics
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionInput
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionRepository
+import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
+import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -18,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReplaySessionTest {
@@ -131,5 +139,49 @@ class ReplaySessionTest {
             assertEquals("distance at ${second}s", first.distanceMeters, rows[second].distanceMeters, 0.0)
             assertEquals("walking time at ${second}s", first.walkingTimeMillis, rows[second].walkingTimeMillis)
         }
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(AndroidJUnit4::class)
+class ReplayHudTest {
+    @Test
+    fun fastReplayOverridesNoticeAndManualVisibilityUntilWalkingResumes() = runTest {
+        val notice = SafetyNotice(ApplicationProvider.getApplicationContext<Context>())
+        val pending = HudVisibility(notice, showNotice = true)
+        val normal = HudVisibility(notice, showNotice = false)
+        val hidden = HudVisibility(notice, showNotice = false)
+        val input = replayInput(ReplayScenario.FAST, 4f, Clock { testScheduler.currentTime }) { it.collect {} }
+        val repo = WalkSessionRepository(flowOf(input), haversine)
+        repo.start(backgroundScope)
+        fun motion() = repo.state.value.motionState
+        fun spec(visibility: HudVisibility) =
+            hudVisualSpecFor(repo.state.value, visibility.hidden, visibility.noticePending)
+
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(MotionState.WALKING, motion())
+        assertEquals("hud-hidden", hidden.activate(motion(), 5_000))
+        assertEquals(HudVisualSpec.Hidden, spec(hidden))
+        assertTrue((spec(pending) as HudVisualSpec.Clusters).showSafetyNotice)
+
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(MotionState.FAST, motion())
+        for (visibility in listOf(pending, normal, hidden)) {
+            assertEquals("ignored-fast", visibility.activate(motion(), 10_000))
+            assertEquals(HudVisualSpec.Fast, spec(visibility))
+        }
+        assertEquals("高速移動中のため非表示", HudVisualSpec.Fast.message)
+
+        advanceTimeBy(8_000)
+        runCurrent()
+        assertEquals(MotionState.WALKING, motion())
+        assertTrue(spec(normal) is HudVisualSpec.Clusters)
+        assertEquals(HudVisualSpec.Hidden, spec(hidden))
+        assertTrue((spec(pending) as HudVisualSpec.Clusters).showSafetyNotice)
+        assertEquals("notice-dismissed", pending.activate(motion(), 18_000))
+        assertEquals("debounced", pending.activate(motion(), 18_499))
+        assertEquals("hud-hidden", pending.activate(motion(), 18_500))
     }
 }

@@ -99,7 +99,7 @@ replay_command() {
 }
 
 list_fieldlogs() {
-    "$adb" exec-out run-as "$package" ls files/fieldlog | tr -d '\r'
+    "$adb" exec-out run-as "$package" ls -1 files/fieldlog | tr -d '\r'
 }
 
 run_checks() {
@@ -108,8 +108,9 @@ run_checks() {
         printf 'FAIL APK not found: %s\n' "$apk"
         return 1
     fi
+    # Wait for startup so Application.onCreate has registered the replay receiver.
     if ! "$adb" install -r --no-streaming "$apk" ||
-        ! "$adb" shell am start -S -n "$package/.MainActivity"; then
+        ! "$adb" shell am start -S -W -n "$package/.MainActivity"; then
         echo 'FAIL install or launch'
         return 1
     fi

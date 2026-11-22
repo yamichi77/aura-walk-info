@@ -157,8 +157,100 @@ check_state() {
     if [[ $state == stopped ]]; then capture_panel "$state" grid "$route"; fi
 }
 
+replay_safety() {
+    "$adb" shell am broadcast -a "$pkg.REPLAY" -p "$pkg" --es scenario "$1" --ef speed 4 >> "$log"
+}
+
+wait_for_safety_log() {
+    local pattern=$1 deadline=$((SECONDS + $2))
+    local pid
+    pid=$("$adb" shell pidof -s "$pkg" | tr -d '\r')
+    [[ $pid =~ ^[0-9]+$ ]] || return 1
+    run_log=
+    while (( SECONDS < deadline )); do
+        run_log=$("$adb" logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud) || return 1
+        if grep -Eq "$pattern" <<< "$run_log"; then return 0; fi
+        sleep 0.25
+    done
+    return 1
+}
+
+refresh_safety_preview() {
+    if $preview; then
+        # A sleeping display draws at launch, but may skip later frames.
+        # Recreate only the Activity so the in-process replay keeps running.
+        "$adb" shell am start -W --activity-single-top -n "$pkg/.MainActivity" \
+            --ez preview2d true --ez capture true >> "$log"
+    fi
+}
+
+save_safety_log() {
+    grep -E 'capture hud-|REPLAY |TRANSITION |notice dismissed by timeout' <<< "$run_log" >> "$log" || true
+}
+
+check_safety() {
+    local route=xr phase
+    local args=(-W --ez capture true)
+    if $preview; then
+        route=2d
+        args+=(--ez preview2d true)
+    fi
+    run_log=
+    if start_run t6b-notice "${args[@]}" --ez resetNotice true && replay_safety walk_stop &&
+        wait_for_safety_log 'notice dismissed by timeout' 22 &&
+        refresh_safety_preview && wait_for_safety_log "capture hud-$route-left-stats\.png: [1-9]" 6; then
+        for phase in notice stats; do capture_panel t6b-notice "left-$phase" "$route"; done
+        if awk -v route="$route" '
+            function seconds(time, parts) {
+                split(time, parts, ":")
+                return parts[1] * 3600 + parts[2] * 60 + parts[3]
+            }
+            index($0, "capture hud-" route "-left-notice.png: ") { notice = seconds($2); seen = 1 }
+            /notice dismissed by timeout/ && seen {
+                delta = seconds($2) - notice
+                if (delta < 0) delta += 86400
+                printf "T6b notice -> timeout: %.3f s\n", delta
+                exit delta >= 14 && delta <= 16 ? 0 : 1
+            }
+            END { if (!seen || delta == "") exit 1 }
+        ' <<< "$run_log" >> "$log"; then
+            record PASS 'T6b 注意文の表示から消去まで約15秒'
+        else
+            record FAIL 'T6b 注意文の表示から消去まで約15秒'
+        fi
+    else
+        record FAIL 'T6b 注意文の時間切替'
+    fi
+    save_safety_log
+
+    run_log=
+    if start_run t6b-fast "${args[@]}" && replay_safety fast &&
+        wait_for_safety_log 'TRANSITION .* -> FAST at ' 15 &&
+        refresh_safety_preview && wait_for_safety_log "capture hud-$route-left-fast\.png: [1-9]" 6; then
+        if awk -v route="$route" '
+            /AuraSession[[:space:]]*:[[:space:]]*TRANSITION / {
+                split($0, fields, " -> ")
+                split(fields[2], nextState, " ")
+                state = nextState[1]
+            }
+            index($0, "capture hud-" route "-left-fast.png: ") && state == "FAST" { found = 1 }
+            END { exit !found }
+        ' <<< "$run_log"; then
+            capture_panel t6b-fast left-fast "$route"
+            echo "T6b: $shots/t6b-fast-left-fast.png を開き、高速移動中のメッセージだけであることを確認してください。"
+        else
+            record FAIL 'T6b FAST 遷移中のキャプチャ'
+        fi
+    else
+        record FAIL 'T6b FAST 再生キャプチャ'
+    fi
+    save_safety_log
+    replay_safety stop || record FAIL 'T6b 再生停止'
+}
+
 if ! prepare; then summary; exit 1; fi
 if ! $preview; then check_placement; fi
+check_safety
 for state in walking stopped fast nofix; do check_state "$state"; done
 summary
 exit "$failed"

@@ -1,17 +1,22 @@
 package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.core.app.ApplicationProvider
+import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertFalse
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
@@ -54,16 +59,45 @@ class StatsPanelTest {
         absent("1.24", "GPS 測位中…")
     }
 
-    private fun show(motion: MotionState, denied: Boolean = false) {
+    @Test
+    fun firstLaunchShowsNoticeInStatsPanelThenPersistsDismissalAfterFifteenSeconds() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val notice = SafetyNotice(context)
+        val visibility = mutableStateOf(HudVisibility(notice, !notice.hasBeenShown))
+        compose.mainClock.autoAdvance = false
+        show(MotionState.WALKING, visibility = { visibility.value })
+        displayed(SafetyNotice.MESSAGE)
+        absent("1.24", "歩行 18:42")
+
+        compose.mainClock.advanceTimeBy(14_900)
+        displayed(SafetyNotice.MESSAGE)
+        assertFalse(notice.hasBeenShown)
+        compose.mainClock.advanceTimeBy(150)
+        absent(SafetyNotice.MESSAGE)
+        displayed("1.24", "歩行 18:42")
+
+        compose.runOnIdle {
+            val relaunchedNotice = SafetyNotice(context)
+            visibility.value = HudVisibility(relaunchedNotice, !relaunchedNotice.hasBeenShown)
+        }
+        compose.mainClock.advanceTimeByFrame()
+        absent(SafetyNotice.MESSAGE)
+        displayed("1.24")
+    }
+
+    private fun show(motion: MotionState, denied: Boolean = false, visibility: () -> HudVisibility? = { null }) {
         val dpPerMeter = 720f
         compose.setContent {
             AdditiveDisplayTheme {
+                val hud = visibility()
                 StatsPanel(
-                    hudVisualSpecFor(hudTestState(motion)), denied, Layout.textScale(dpPerMeter),
+                    hudVisualSpecFor(hudTestState(motion), hud?.hidden == true, hud?.noticePending == true),
+                    denied, Layout.textScale(dpPerMeter),
                     Modifier.size(
                         (HudPlacement.statsWidthMeters * dpPerMeter).dp,
                         (HudPlacement.statsHeightMeters * dpPerMeter).dp,
                     ),
+                    onNoticeTimeout = { hud?.dismissNotice() },
                 )
             }
         }

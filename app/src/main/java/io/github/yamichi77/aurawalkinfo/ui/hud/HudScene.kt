@@ -55,10 +55,15 @@ import kotlinx.coroutines.flow.map
 
 @OptIn(ExperimentalFollowingSubspaceApi::class)
 @Composable
-internal fun HudScene(spec: HudVisualSpec, locationDenied: Boolean, debug: HudDebugOptions) {
+internal fun HudScene(
+    spec: HudVisualSpec,
+    locationDenied: Boolean,
+    debug: HudDebugOptions,
+    onNoticeTimeout: () -> Unit,
+) {
     val session = LocalSession.current
     if (session == null) {
-        PhoneScreen(spec, locationDenied, debug)
+        PhoneScreen(spec, locationDenied, debug, onNoticeTimeout)
         return
     }
 
@@ -87,7 +92,7 @@ internal fun HudScene(spec: HudVisualSpec, locationDenied: Boolean, debug: HudDe
         }
     }
 
-    if (!configured) return
+    if (!configured || spec is HudVisualSpec.Hidden) return
     Subspace(follow = FollowTarget.view(FollowMode.tight(TrackedDimensions.All))) {
         // Read the scale applied by Compose XR in the actual following hierarchy.
         var root by remember { mutableStateOf<Entity?>(null) }
@@ -101,7 +106,9 @@ internal fun HudScene(spec: HudVisualSpec, locationDenied: Boolean, debug: HudDe
         SceneCoreEntity(factory = { Entity.create(session, "Aura HUD") }, update = { root = it }) {
             scale?.let {
                 if (tracking || showRotationFallback) {
-                    SpatialHudPanels(session, it, spec, locationDenied, debug, check, tracking, showRotationFallback)
+                    SpatialHudPanels(
+                        session, it, spec, locationDenied, debug, check, tracking, showRotationFallback, onNoticeTimeout,
+                    )
                 }
             }
         }
@@ -119,6 +126,7 @@ private fun SpatialHudPanels(
     check: HudPlacementCheck?,
     tracking: Boolean,
     showRotationFallback: Boolean,
+    onNoticeTimeout: () -> Unit,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -131,7 +139,8 @@ private fun SpatialHudPanels(
         ) {
             StatsPanel(
                 spec, locationDenied, Layout.textScale(physicalDpPerMeter),
-                Modifier.fillMaxSize().clipToBounds().capturePanelOnNextDraw(debug.captureName("xr", "left")),
+                Modifier.fillMaxSize().clipToBounds().capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
+                onNoticeTimeout,
             )
         }
 

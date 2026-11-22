@@ -5,6 +5,7 @@ import io.github.yamichi77.aurawalkinfo.location.AddressParts
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
+import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
 
 internal data class HudDebugOptions(
     val grid: Boolean = false,
@@ -12,8 +13,19 @@ internal data class HudDebugOptions(
     val capture: Boolean = false,
     val preview2d: Boolean = false,
     val fakeState: WalkSessionState? = null,
+    val resetNotice: Boolean = false,
 ) {
     fun captureName(route: String, panel: String) = if (capture) "hud-$route-$panel.png" else null
+
+    fun leftCaptureName(route: String, spec: HudVisualSpec): String? {
+        if (!capture || fakeState != null) return captureName(route, "left")
+        val suffix = when (spec) {
+            HudVisualSpec.Hidden -> return null
+            HudVisualSpec.Fast -> "fast"
+            is HudVisualSpec.Clusters -> if (spec.showSafetyNotice) "notice" else "stats"
+        }
+        return captureName(route, "left-$suffix")
+    }
 
     companion object {
         fun from(intent: Intent): HudDebugOptions {
@@ -30,6 +42,7 @@ internal data class HudDebugOptions(
                 selfCheck = selfCheck,
                 capture = intent.getBooleanExtra("capture", false),
                 preview2d = intent.getBooleanExtra("preview2d", false),
+                resetNotice = intent.getBooleanExtra("resetNotice", false),
                 fakeState = motion?.let {
                     WalkSessionState(
                         distanceMeters = 1_240.0,

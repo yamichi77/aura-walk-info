@@ -29,7 +29,13 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.gridHeightMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.gridWidthMeters
 
 @Composable
-internal fun PhoneScreen(spec: HudVisualSpec, locationDenied: Boolean, debug: HudDebugOptions) {
+internal fun PhoneScreen(
+    spec: HudVisualSpec,
+    locationDenied: Boolean,
+    debug: HudDebugOptions,
+    onNoticeTimeout: () -> Unit,
+) {
+    if (spec is HudVisualSpec.Hidden) return
     LaunchedEffect(debug) {
         if (debug.selfCheck) Log.i("AuraPlacement", "placement FAIL spatial UI unavailable")
     }
@@ -44,7 +50,8 @@ internal fun PhoneScreen(spec: HudVisualSpec, locationDenied: Boolean, debug: Hu
                         Modifier.size(
                             (HudPlacement.statsWidthMeters * dpPerMeter).dp,
                             (HudPlacement.statsHeightMeters * dpPerMeter).dp,
-                        ).capturePanelOnNextDraw(debug.captureName("2d", "left")),
+                        ).capturePanelOnNextDraw(debug.leftCaptureName("2d", spec)),
+                        onNoticeTimeout,
                     )
                     if (!locationDenied && spec is HudVisualSpec.Clusters) {
                         val size = (HudPlacement.mapSizeMeters(spec.mapDiameter) * dpPerMeter).dp
@@ -57,7 +64,7 @@ internal fun PhoneScreen(spec: HudVisualSpec, locationDenied: Boolean, debug: Hu
                     }
                 }
             } else {
-                StatsPanel(spec, locationDenied, 1f)
+                StatsPanel(spec, locationDenied, 1f, onNoticeTimeout = onNoticeTimeout)
             }
             if (debug.grid) DebugAngleGrid(
                 Modifier.fillMaxWidth().aspectRatio(gridWidthMeters / gridHeightMeters)

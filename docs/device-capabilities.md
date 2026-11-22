@@ -65,3 +65,9 @@ $pkg = "io.github.yamichi77.aurawalkinfo"
 - T4 の確認時は `mWakefulness=Asleep`、`mLastSleepReason=xr_doff`。非装着中は PNG で 2D の描画内容を確認できた。グラス上の配置・原点・回転符号は装着時の実測待ち。
 - 実装の初期値は +X が右、+Y が上、−Z が正面。パネルは局所 +Z が頭を向くよう回転する。Compose XR 1.0.0-rc01 の `ViewTarget` が前方へ 0.5 m ずらすことは同梱バイナリで確認し、配置で相殺した。
 - グラスを装着してロックを解除し、Git Bash で `bash scripts/device-check.sh` を実行する。最初の約12秒は頭の向きをゆっくり少し変えてから止める。`AuraPlacement` が頭に対するパネルの yaw・pitch・距離・中央寄りの端・法線角を5回記録する。ログは `build/device-check/<日時>/log.txt` に保存される。非装着で PNG のみ取る場合は `--preview` を付ける。
+
+## 安全表示と入力（T6b）
+
+- 非装着時は `mWakefulness=Asleep`、`mLastSleepReason=xr_doff`。通常の `device-check.sh` は終了コード 2 で停止した。2D プレビューでは最初のフレームを保存できたが、スリープ中の状態切替で描画が止まることがあった。プレビューの診断では状態切替を logcat で待ち、同じプロセスの Activity を再生成して PNG を保存した。
+- 実機の 2D プレビューでは左パネルに注意文の全文が入り、約15秒で消えた。その後の起動では通常の数値表示に戻った。4倍速の合成ルートでは、再生時刻 37 秒の `WALKING -> FAST` から実時間 0.442 秒後に、左パネルに高速移動のメッセージだけを確認した。
+- パックのタッチパッドからアプリに届く実イベントと、装着時の注意文の位置は未確認。装着して静止した状態でタップし、`AuraInput` のイベントと表示切替の結果を照合する。

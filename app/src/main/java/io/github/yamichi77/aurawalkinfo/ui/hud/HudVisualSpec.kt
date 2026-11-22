@@ -17,6 +17,8 @@ import io.github.yamichi77.aurawalkinfo.ui.theme.HudDimmed
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 
 internal sealed interface HudVisualSpec {
+    data object Hidden : HudVisualSpec
+
     data object Fast : HudVisualSpec {
         const val message = "高速移動中のため非表示"
         const val opacity = 0.85f
@@ -35,11 +37,17 @@ internal sealed interface HudVisualSpec {
         val mapDiameter: Float,
         val mapLineOpacity: Float,
         val mapArrowColor: Color,
+        val showSafetyNotice: Boolean = false,
     ) : HudVisualSpec
 }
 
-internal fun hudVisualSpecFor(state: WalkSessionState): HudVisualSpec {
+internal fun hudVisualSpecFor(
+    state: WalkSessionState,
+    userHidden: Boolean = false,
+    noticePending: Boolean = false,
+): HudVisualSpec {
     if (state.motionState == MotionState.FAST) return HudVisualSpec.Fast
+    if (userHidden) return HudVisualSpec.Hidden
     val stopped = state.motionState == MotionState.STOPPED
     val noFix = state.motionState == MotionState.NO_FIX
     val detail = when {
@@ -62,5 +70,6 @@ internal fun hudVisualSpecFor(state: WalkSessionState): HudVisualSpec {
         mapDiameter = if (stopped) Layout.stoppedDiameter else Layout.walkingDiameter,
         mapLineOpacity = if (noFix) 0.3f else 0.4f,
         mapArrowColor = if (noFix) HudDimmed else HudArrow,
+        showSafetyNotice = noticePending,
     )
 }

@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -25,8 +27,10 @@ import androidx.compose.ui.text.style.TextGeometricTransform
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
+import kotlinx.coroutines.delay
 
 internal const val HudAnimationMillis = 300
 
@@ -36,6 +40,7 @@ internal fun StatsPanel(
     locationDenied: Boolean,
     textScale: Float,
     modifier: Modifier = Modifier,
+    onNoticeTimeout: () -> Unit = {},
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.TopStart) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
@@ -44,6 +49,21 @@ internal fun StatsPanel(
                 spec.message, spec.textSize * textScale, HudText, Modifier.alpha(spec.opacity),
                 widthPx = widthPx,
             )
+            spec is HudVisualSpec.Hidden -> Unit
+            spec is HudVisualSpec.Clusters && spec.showSafetyNotice -> {
+                val onTimeout by rememberUpdatedState(onNoticeTimeout)
+                LaunchedEffect(Unit) {
+                    delay(15_000L)
+                    onTimeout()
+                }
+                Text(
+                    text = SafetyNotice.MESSAGE,
+                    color = HudText,
+                    fontSize = (14 * textScale).sp,
+                    lineHeight = (16 * textScale).sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                )
+            }
             locationDenied -> HudLabel("位置の権限がありません", 14 * textScale, HudText, widthPx = widthPx)
             spec is HudVisualSpec.Clusters -> {
                 val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
