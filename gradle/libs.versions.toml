@@ -1,0 +1,43 @@
+[versions]
+agp = "9.0.1"
+kotlin = "2.2.10"
+xr-runtime = "1.1.0-alpha03"
+xr-scenecore = "1.1.0-alpha02"
+xr-compose = "1.0.0-rc01"
+# alpha18 requires compileSdk 37.1 and AGP 9.3.1.
+xr-material3 = "1.0.0-alpha17"
+xr-arcore = "1.1.0-alpha02"
+compose-bom = "2026.02.01"
+activity = "1.12.4"
+lifecycle = "2.10.0"
+location = "21.4.0"
+maps-compose = "7.0.0"
+maps = "19.2.0"
+coroutines = "1.10.2"
+junit = "4.13.2"
+secrets = "2.0.1"
+
+[libraries]
+xr-runtime = { module = "androidx.xr.runtime:runtime", version.ref = "xr-runtime" }
+xr-scenecore = { module = "androidx.xr.scenecore:scenecore", version.ref = "xr-scenecore" }
+xr-compose = { module = "androidx.xr.compose:compose", version.ref = "xr-compose" }
+xr-material3 = { module = "androidx.xr.compose.material3:material3", version.ref = "xr-material3" }
+xr-arcore = { module = "androidx.xr.arcore:arcore", version.ref = "xr-arcore" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "location" }
+play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "maps" }
+maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "maps-compose" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+maps-secrets = { id = "com.google.android.libraries.mapsplatform.secrets-gradle-plugin", version.ref = "secrets" }
