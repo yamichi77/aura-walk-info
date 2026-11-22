@@ -18,8 +18,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
+// These tests construct their own AppContainer, so skip AuraWalkApplication's startup.
+@Config(application = Application::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppContainerTest {
     @Test
