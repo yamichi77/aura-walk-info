@@ -1,6 +1,8 @@
 package io.github.yamichi77.aurawalkinfo.location
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 
 data class LocationSample(
     val elapsedRealtimeMillis: Long,
@@ -13,6 +15,9 @@ data class LocationSample(
 
 interface LocationRepository {
     val locations: Flow<LocationSample>
+
+    /** A null event advances timeout checks without supplying a fix. */
+    fun sessionEvents(ticks: Flow<Unit>): Flow<LocationSample?> = merge(locations, ticks.map { null })
 }
 
 fun interface DistanceCalculator {

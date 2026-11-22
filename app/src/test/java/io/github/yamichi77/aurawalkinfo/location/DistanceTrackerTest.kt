@@ -1,5 +1,8 @@
 package io.github.yamichi77.aurawalkinfo.location
 
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.haversine
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.syntheticFix
+
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

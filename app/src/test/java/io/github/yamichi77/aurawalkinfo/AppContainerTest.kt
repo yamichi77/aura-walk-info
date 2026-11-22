@@ -2,9 +2,11 @@ package io.github.yamichi77.aurawalkinfo
 
 import android.Manifest
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.location.LocationManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.REPLAY_ACTION
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
@@ -20,6 +22,25 @@ import org.robolectric.Shadows.shadowOf
 @RunWith(AndroidJUnit4::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppContainerTest {
+    @Test
+    fun registersReplayReceiverOnlyWhenDebuggableAndRequiresShellPermission() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val info = app.applicationInfo
+        val originalFlags = info.flags
+        try {
+            info.flags = originalFlags and ApplicationInfo.FLAG_DEBUGGABLE.inv()
+            AppContainer(app)
+            assertFalse(shadowOf(app).registeredReceivers.any { it.intentFilter.hasAction(REPLAY_ACTION) })
+
+            info.flags = originalFlags or ApplicationInfo.FLAG_DEBUGGABLE
+            AppContainer(app)
+            val receiver = shadowOf(app).registeredReceivers.single { it.intentFilter.hasAction(REPLAY_ACTION) }
+            assertEquals(Manifest.permission.DUMP, receiver.broadcastPermission)
+        } finally {
+            info.flags = originalFlags
+        }
+    }
+
     @Test
     fun subscribesToGpsOnlyAfterFineLocationPermissionAndCleansUpOnCancellation() = runTest {
         val app = ApplicationProvider.getApplicationContext<Application>()

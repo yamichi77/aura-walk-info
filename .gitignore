@@ -1,6 +1,7 @@
 # Gradle / Android Studio
 .gradle/
 build/
+fieldlogs/
 /captures
 .externalNativeBuild/
 .cxx/

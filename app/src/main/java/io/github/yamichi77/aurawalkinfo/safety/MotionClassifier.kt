@@ -30,6 +30,8 @@ class MotionClassifier(private val distanceCalculator: DistanceCalculator) {
     private var stoppedSince: Long? = null
     var latestSpeedMps: Double? = null
         private set
+    internal var averageSpeedMps: Double? = null
+        private set
 
     fun onLocation(sample: LocationSample, nowMillis: Long = sample.elapsedRealtimeMillis): MotionState {
         val previous = lastSample
@@ -63,6 +65,7 @@ class MotionClassifier(private val distanceCalculator: DistanceCalculator) {
             speeds.removeFirst()
         }
         val average = if (speeds.isEmpty()) null else speeds.map { it.metersPerSecond }.average()
+        averageSpeedMps = average
         fastSince = trackSince(average != null && average > MotionThresholds.FAST_MPS, fastSince, nowMillis)
         slowSince = trackSince(average != null && average <= MotionThresholds.FAST_MPS, slowSince, nowMillis)
 

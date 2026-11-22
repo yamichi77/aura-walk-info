@@ -1,5 +1,7 @@
-package io.github.yamichi77.aurawalkinfo.location
+package io.github.yamichi77.aurawalkinfo.diagnostics.replay
 
+import io.github.yamichi77.aurawalkinfo.location.DistanceCalculator
+import io.github.yamichi77.aurawalkinfo.location.LocationSample
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
@@ -23,10 +25,13 @@ internal fun syntheticFix(
     accuracy: Float = 5f,
     speed: Float? = 1.3f,
     bearing: Float? = null,
+    eastMeters: Double = 0.0,
+    originLatitude: Double = 0.0,
+    originLongitude: Double = 0.0,
 ): LocationSample = LocationSample(
     millis,
-    Math.toDegrees(northMeters / EARTH_RADIUS_METERS),
-    0.0,
+    originLatitude + Math.toDegrees(northMeters / EARTH_RADIUS_METERS),
+    originLongitude + Math.toDegrees(eastMeters / (EARTH_RADIUS_METERS * cos(Math.toRadians(originLatitude)))),
     accuracy,
     speed,
     bearing,
