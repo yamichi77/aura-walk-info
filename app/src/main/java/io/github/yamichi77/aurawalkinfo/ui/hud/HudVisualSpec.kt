@@ -3,6 +3,7 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import androidx.compose.ui.graphics.Color
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.format.FormattedDistance
@@ -38,6 +39,9 @@ internal sealed interface HudVisualSpec {
         val mapLineOpacity: Float,
         val mapArrowColor: Color,
         val showSafetyNotice: Boolean = false,
+        val mapCenter: MapCenter? = null,
+        val mapBearingDeg: Float = 0f,
+        val mapOpacity: Float = opacity,
     ) : HudVisualSpec
 }
 
@@ -50,6 +54,7 @@ internal fun hudVisualSpecFor(
     if (userHidden) return HudVisualSpec.Hidden
     val stopped = state.motionState == MotionState.STOPPED
     val noFix = state.motionState == MotionState.NO_FIX
+    val opacity = if (stopped) 1f else 0.7f
     val detail = when {
         noFix -> "GPS 測位中…"
         stopped -> listOfNotNull(
@@ -59,7 +64,7 @@ internal fun hudVisualSpecFor(
         else -> null
     }
     return HudVisualSpec.Clusters(
-        opacity = if (stopped) 1f else 0.7f,
+        opacity = opacity,
         distance = formatDistance(state.distanceMeters),
         distanceColor = if (noFix) HudDimmed else HudText,
         walkingTime = formatWalkingTime(state.walkingTimeMillis),
@@ -71,5 +76,8 @@ internal fun hudVisualSpecFor(
         mapLineOpacity = if (noFix) 0.3f else 0.4f,
         mapArrowColor = if (noFix) HudDimmed else HudArrow,
         showSafetyNotice = noticePending,
+        mapCenter = state.mapCenter,
+        mapBearingDeg = state.mapBearingDeg ?: 0f,
+        mapOpacity = if (noFix) 0.3f else opacity,
     )
 }

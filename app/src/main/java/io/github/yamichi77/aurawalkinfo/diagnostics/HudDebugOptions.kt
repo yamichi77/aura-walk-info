@@ -4,6 +4,7 @@ import android.content.Intent
 import io.github.yamichi77.aurawalkinfo.location.AddressParts
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
 
@@ -35,6 +36,7 @@ internal data class HudDebugOptions(
                 "stopped" -> MotionState.STOPPED
                 "fast" -> MotionState.FAST
                 "nofix" -> MotionState.NO_FIX
+                "replay" -> null // Use the repository state even when selfcheck is on.
                 else -> if (selfCheck) MotionState.STOPPED else null
             }
             return HudDebugOptions(
@@ -50,6 +52,8 @@ internal data class HudDebugOptions(
                         elapsedMillis = 1_265_000,
                         motionState = it,
                         address = AddressState.Available(AddressParts("架空県", "みほん市", "試験町", "1丁目")),
+                        // Synthetic fix near the public origin of the walk_stop replay.
+                        mapCenter = MapCenter(35.6812, 139.7658),
                     )
                 },
             )

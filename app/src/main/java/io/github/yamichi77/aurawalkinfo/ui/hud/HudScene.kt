@@ -148,8 +148,8 @@ private fun SpatialHudPanels(
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
             PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check) {
-                MiniMapPlaceholder(
-                    spec, Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),
+                MiniMapPanel(
+                    spec, debug, Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),
                 )
             }
         } else if (debug.capture && spec is HudVisualSpec.Fast) {
