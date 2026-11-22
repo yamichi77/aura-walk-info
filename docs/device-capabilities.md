@@ -58,6 +58,10 @@ $pkg = "io.github.yamichi77.aurawalkinfo"
 
 | 軸 | 正方向の実測 |
 | --- | --- |
-| yaw | |
-| pitch | |
-| roll | |
+| yaw | 未測定（装着待ち） |
+| pitch | 未測定（装着待ち） |
+| roll | 未測定（T4 の配置では roll を明示的に回転させていない） |
+
+- T4 の確認時は `mWakefulness=Asleep`、`mLastSleepReason=xr_doff`。非装着中は PNG で 2D の描画内容を確認できた。グラス上の配置・原点・回転符号は装着時の実測待ち。
+- 実装の初期値は +X が右、+Y が上、−Z が正面。パネルは局所 +Z が頭を向くよう回転する。Compose XR 1.0.0-rc01 の `ViewTarget` が前方へ 0.5 m ずらすことは同梱バイナリで確認し、配置で相殺した。
+- グラスを装着してロックを解除し、Git Bash で `bash scripts/device-check.sh` を実行する。最初の約12秒は頭の向きをゆっくり少し変えてから止める。`AuraPlacement` が頭に対するパネルの yaw・pitch・距離・中央寄りの端・法線角を5回記録する。ログは `build/device-check/<日時>/log.txt` に保存される。非装着で PNG のみ取る場合は `--preview` を付ける。
