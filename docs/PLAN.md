@@ -72,6 +72,8 @@ XREAL AURA（Android XR の有線XRグラス）で、徒歩中に以下の情報
 
 ## 2. 安全設計の方針（最重要・変更時はユーザー確認）
 
+> 文字サイズ・色・表示形式まで含めた UI の詳細仕様は [UI.md](UI.md) にある（2026-11-22 承認済み）。実装はそちらに従う。
+
 ### 2.1 配置ルール
 
 ```
@@ -313,6 +315,7 @@ app/src/main/java/<package>/walkinfo/
 - 歩数は扱わず、GPS で測る歩いた距離を出す
 - 地図は Google Maps（maps-compose、Map ID なし）
 - GitHub で public に管理し、betterleaks で秘密情報の混入を防ぐ（コミット前フックと GitHub Actions）
+- UI 設計は承認済み。詳細は [UI.md](UI.md)、参照モックは [ui-mockup.html](ui-mockup.html)（左に距離・歩行時間・住所、右にミニマップ、中央 ±15° は空ける、状態ごとの表示切替）
 
 未決（ユーザー確認待ち）
 1. AURA の実機は手元にあるか（無ければ Phase 0 の実機調査は保留し、エミュレータで進める）

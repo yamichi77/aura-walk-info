@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walk HUD mockup</title>
+<style>
+  :root { --bg: #f5f4ef; --fg: #1f1f1d; --muted: #5f5e5a; --border: #b4b2a9; --accent: #185fa5; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1b; --fg: #ecebe6; --muted: #b4b2a9; --border: #5f5e5a; --accent: #85b7eb; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font-family: system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--fg); cursor: pointer; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  label { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  svg { display: block; width: 100%; border-radius: 8px; }
+  p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+</style>
+</head>
+<body>
+<main>
+<div class="bar">
+  <button data-mode="walk">歩行中</button>
+  <button data-mode="stop">停止中</button>
+  <button data-mode="fast">高速移動</button>
+  <button data-mode="nofix">測位なし</button>
+  <label><input type="checkbox" id="guide" checked> ガイド線</label>
+</div>
+<!-- viewBox 680x420 / 1° = 8.5px / 正面0° = x340 / 目線0° = y200。背景の街並みはイメージ用で実装しない -->
+<svg viewBox="0 0 680 420" role="img" aria-label="グラス越しの視界と HUD の配置">
+  <defs><clipPath id="mapclip"><circle id="mapclipc" cx="527" cy="268" r="34"/></clipPath></defs>
+  <rect x="0" y="0" width="680" height="200" fill="#6b7882"/>
+  <rect x="0" y="200" width="680" height="220" fill="#4a5158"/>
+  <rect x="0" y="70" width="150" height="130" fill="#3f474e"/>
+  <rect x="40" y="40" width="70" height="160" fill="#4a535b"/>
+  <rect x="530" y="60" width="150" height="140" fill="#3f474e"/>
+  <rect x="575" y="30" width="60" height="170" fill="#4a535b"/>
+  <rect x="250" y="150" width="60" height="50" fill="#56606a"/>
+  <rect x="370" y="140" width="70" height="60" fill="#56606a"/>
+  <polygon points="300,200 380,200 560,420 120,420" fill="#2f3439"/>
+  <polygon points="300,200 270,200 0,400 0,420 120,420" fill="#5d656d"/>
+  <polygon points="380,200 410,200 680,400 680,420 560,420" fill="#5d656d"/>
+  <line x1="340" y1="205" x2="340" y2="230" stroke="#8a9097" stroke-width="2"/>
+  <line x1="340" y1="250" x2="340" y2="290" stroke="#8a9097" stroke-width="3"/>
+  <line x1="340" y1="320" x2="340" y2="380" stroke="#8a9097" stroke-width="4"/>
+  <ellipse cx="420" cy="232" rx="5" ry="16" fill="#2a2e33"/>
+  <circle cx="420" cy="212" r="5" fill="#2a2e33"/>
+
+  <g id="guides">
+    <rect x="85" y="30" width="510" height="340" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-dasharray="6 5" rx="6"/>
+    <text x="93" y="46" font-size="11" fill="#ffffff" fill-opacity="0.75">表示できる範囲 約61°×41°</text>
+    <rect x="212.5" y="30" width="255" height="340" fill="#EF9F27" fill-opacity="0.08" stroke="#EF9F27" stroke-dasharray="4 4"/>
+    <text x="340" y="60" font-size="12" fill="#FAC775" text-anchor="middle">中央クリアゾーン 左15°〜右15°</text>
+    <text x="340" y="76" font-size="11" fill="#FAC775" text-anchor="middle">UI を置かない（上下とも）</text>
+    <line x1="85" y1="200" x2="595" y2="200" stroke="#ffffff" stroke-opacity="0.35" stroke-dasharray="2 4"/>
+    <text x="589" y="194" font-size="11" fill="#ffffff" fill-opacity="0.7" text-anchor="end">目線 0°</text>
+    <g stroke="#ffffff" stroke-opacity="0.6">
+      <line x1="85" y1="370" x2="85" y2="378"/><line x1="170" y1="370" x2="170" y2="378"/><line x1="212.5" y1="370" x2="212.5" y2="378"/><line x1="255" y1="370" x2="255" y2="378"/>
+      <line x1="340" y1="370" x2="340" y2="378"/>
+      <line x1="425" y1="370" x2="425" y2="378"/><line x1="467.5" y1="370" x2="467.5" y2="378"/><line x1="510" y1="370" x2="510" y2="378"/><line x1="595" y1="370" x2="595" y2="378"/>
+    </g>
+    <g font-size="11" fill="#ffffff" fill-opacity="0.7" text-anchor="middle">
+      <text x="85" y="392">30°</text><text x="170" y="392">20°</text><text x="212.5" y="392">15°</text><text x="255" y="392">10°</text>
+      <text x="340" y="392">0°</text>
+      <text x="425" y="392">10°</text><text x="467.5" y="392">15°</text><text x="510" y="392">20°</text><text x="595" y="392">30°</text>
+    </g>
+    <text x="153" y="360" font-size="11" fill="#ffffff" fill-opacity="0.7" text-anchor="middle">左22° / 下8°</text>
+    <text x="527" y="360" font-size="11" fill="#ffffff" fill-opacity="0.7" text-anchor="middle">右22° / 下8°</text>
+  </g>
+
+  <g id="left">
+    <text id="dist" x="100" y="252" font-size="30" font-weight="500" fill="#E0F7FF">1.24<tspan font-size="15" dx="4">km</tspan></text>
+    <text id="time" x="101" y="274" font-size="14" fill="#E0F7FF">歩行 18:42</text>
+    <text id="extra1" x="101" y="292" font-size="12" fill="#9FE1CB"></text>
+    <text id="addr1" x="101" y="292" font-size="12" fill="#B5D4F4">渋谷区神南1丁目</text>
+    <text id="addr2" x="101" y="308" font-size="12" fill="#B5D4F4"></text>
+  </g>
+  <g id="right">
+    <g clip-path="url(#mapclip)" id="roads" stroke="#9aa3ab" stroke-opacity="0.7" fill="none">
+      <line x1="470" y1="250" x2="590" y2="290" stroke-width="3"/>
+      <line x1="527" y1="200" x2="520" y2="340" stroke-width="4"/>
+      <line x1="470" y1="300" x2="590" y2="230" stroke-width="2"/>
+      <line x1="490" y1="210" x2="560" y2="330" stroke-width="1.5"/>
+    </g>
+    <circle id="mapring" cx="527" cy="268" r="34" fill="none" stroke="#E0F7FF" stroke-opacity="0.4"/>
+    <polygon id="arrow" points="527,256 535,276 527,271 519,276" fill="#7FDBFF"/>
+  </g>
+  <text id="notice" x="100" y="272" font-size="13" fill="#E0F7FF" fill-opacity="0.85"></text>
+</svg>
+<p id="cap"></p>
+<p>仕様の正は <a href="UI.md">UI.md</a>。このモックは見た目の目安で、背景の街並みは実装しない。</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const GRAY = "#888780";
+  const caps = {
+    walk: "歩行中: 不透明度70%のコンパクト表示。地図の直径8°、住所は1行。",
+    stop: "停止中: 不透明度100%の詳細表示。地図の直径12°、経過時間と平均ペース、2行の住所を出す。",
+    fast: "高速移動: 左右のクラスタを消し、左クラスタの位置に小さな通知だけを出す。",
+    nofix: "測位なし: 距離と時間の加算を止める。距離・地図・住所を灰色にし、「GPS 測位中…」と出す。"
+  };
+  function setMode(m) {
+    document.querySelectorAll("button[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+    const hidden = m === "fast";
+    $("left").style.display = $("right").style.display = hidden ? "none" : "";
+    $("notice").textContent = hidden ? "高速移動中のため非表示" : "";
+    const op = m === "stop" ? 1 : 0.7;
+    $("left").setAttribute("opacity", op);
+    $("right").setAttribute("opacity", op);
+    const r = m === "stop" ? 51 : 34;
+    $("mapring").setAttribute("r", r);
+    $("mapclipc").setAttribute("r", r);
+    const nofix = m === "nofix";
+    $("dist").setAttribute("fill", nofix ? GRAY : "#E0F7FF");
+    $("arrow").setAttribute("fill", nofix ? GRAY : "#7FDBFF");
+    $("roads").setAttribute("stroke-opacity", nofix ? 0.3 : 0.7);
+    $("addr1").setAttribute("fill", nofix ? GRAY : "#B5D4F4");
+    if (m === "stop") {
+      $("extra1").textContent = "経過 21:05 ・ 15'05\"/km";
+      $("addr1").setAttribute("y", 310);
+      $("addr1").textContent = "東京都渋谷区";
+      $("addr2").textContent = "神南1丁目";
+      $("addr2").setAttribute("y", 326);
+    } else {
+      $("extra1").textContent = nofix ? "GPS 測位中…" : "";
+      $("addr1").setAttribute("y", nofix ? 310 : 292);
+      $("addr1").textContent = "渋谷区神南1丁目";
+      $("addr2").textContent = "";
+    }
+    $("cap").textContent = caps[m];
+  }
+  document.querySelectorAll("button[data-mode]").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+  $("guide").onchange = (e) => ($("guides").style.display = e.target.checked ? "" : "none");
+  setMode("walk");
+</script>
+</body>
+</html>
