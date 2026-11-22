@@ -1,6 +1,8 @@
 # T5: ミニマップ（UI.md §3.2）
 
-まず [README.md](README.md) の共通ルールを読むこと。T1〜T4 は完了している。T6（安全機能）が別の作業ツリーで同時に進んでいる。
+まず [README.md](README.md) の共通ルールを読むこと。T1〜T4 と T6a は完了している。T6b（安全機能の仕上げ）が別の作業ツリーで同時に進んでいる。
+
+実機の制約: グラスを装着していないと表示がスリープし、空間 UI も地図の描画も確かめられない（T2・T4 の知見）。実機での地図の確認は `scripts/device-check.sh` に地図の項目（関数）として足し、オーケストレーターがユーザーの装着中に実行する。非装着でも、2D の画面に同じ `MiniMapPanel` を出して確かめられる範囲は確かめる。合成ルートの再生は `adb shell am broadcast -a io.github.yamichi77.aurawalkinfo.REPLAY -p io.github.yamichi77.aurawalkinfo --es scenario walk_stop --ef speed 4`（T6a）。
 
 ## 目的
 
@@ -46,7 +48,7 @@
 
 1. `./gradlew test` と `./gradlew assembleDebug` が通る
 2. 実機で `--es fakeState walking` と `stopped` と `nofix`、`--ez selfcheck true` で起動し、`AuraMap` の自己診断が `PASS` になることを確かめる
-3. 実機で、T6 の合成ルートの再生が使えるなら `--es replay walk_stop --ef replaySpeed 4` で、曲がったときにカメラの bearing が約 90° 変わることを logcat で確かめる（T6 がまだ main に無ければ、この項目は省いて最終報告に書く）
+3. T6a の再生（`walk_stop`）で、曲がったときにカメラの bearing が約 90° 変わることを logcat（`AuraMap`）で確かめる。非装着で地図が描画されない場合は、`mapBearingDeg` からカメラに渡す値の変化までを確かめ、残りを `scripts/device-check.sh` の項目にする
 4. snapshot の画像を取り出して、道路の線が見え、背景が黒いことを確かめる
 
 ## 受け入れ条件

@@ -7,6 +7,21 @@
 T3 の `StateFlow<WalkSessionState>` を、UI.md どおりの位置と形式で HUD に表示する。
 配置を実機で確かめるためのデバッグ用の角度ガイドも作る。**UI.md の配置・中央クリアゾーン・状態ごとの表示は変えない。**
 
+## T2 で分かった実機の制約（必読）
+
+- **グラスを装着していないと表示がスリープする**（`dumpsys power` の `mLastSleepReason=xr_doff`、`mInteractive=false`）。このとき `LocalSpatialCapabilities` は全部 `false`、`ArDevice` は `STOPPED` になり、空間 UI の描画も配置の自己診断もできない。adb からの起床やスリープ抑止では復帰しない
+- そこで、実機での確認は**装着中に1コマンドで全部回せるスクリプト**にまとめる（下の「実機確認スクリプト」）。作業の最初に `adb shell dumpsys power | grep -E "mWakefulness|mLastSleepReason|mInteractive"` で状態を見て、装着中ならスクリプトまで実行する。非装着なら、スクリプトは非装着でも進める範囲まで動作を確かめ、残りは最終報告に書く。オーケストレーターが、ユーザーの装着中にスクリプトを実行する
+- adb の作法（T2 の知見）: インストールは `adb install -r --no-streaming`、起動は `adb shell am start -S ...`（`-S` で毎回起動し直さないと診断が走らない）
+- アプリ内キャプチャは T2 の `capturePanelOnNextDraw("名前.png")`（`diagnostics/PanelCapture.kt`）を使う
+- デバッグビルドの判定は T2 が `ApplicationInfo.FLAG_DEBUGGABLE` で行っている（AGP 9 は `BuildConfig` が既定で無効）。判定は1か所の関数にまとめて使い回す
+
+## 並行作業との分担
+
+T6a（合成ルートの再生とフィールドログ）が別の worktree で同時に進んでいる。T6a は `AppContainer.kt`、`session/`、`location/`、`safety/`、`diagnostics/replay/`、`diagnostics/fieldlog/` を触る。このタスクではそれらを**触らない**（読むだけ）。
+
+- `AppContainer` はこのタスクで新しく作る `AuraWalkApplication`（`Application` のサブクラス、`val container: AppContainer`）が1つだけ持つ。マニフェストの `android:name` に登録する。アクティビティの作り直しでセッションが途切れないようにするため
+- `WalkSessionRepository.start(scope)` は、`AuraWalkApplication` が持つアプリ全体のスコープで1回だけ呼ぶ（位置の権限が後から付与されても、T3 の `AppContainer` が1秒ごとに確かめて購読を始める）
+
 ## 作るもの
 
 ### ui/hud/HudPlacement
@@ -87,14 +102,26 @@ T3 の `StateFlow<WalkSessionState>` を、UI.md どおりの位置と形式で 
 - 非 XR 端末では、T3 の値を 2D の画面にそのまま並べるだけでよい（`ui/fallback/PhoneScreen`）
 - T2 のプローブ用モード（`--es mode probe` など）は残す
 
+### 実機確認スクリプト（`scripts/device-check.sh`）
+
+Git Bash で動くスクリプトを作る。オーケストレーターがユーザーの装着中に実行する。
+
+- 前提の確認: adb で端末が見えるか、`dumpsys power` で装着中（表示がオン）か。非装着なら、その旨を出して終了コード 2 で止まる
+- `JAVA_HOME` を JDK 21 にして `assembleDebug` → `adb install -r --no-streaming`
+- 位置と `HEAD_TRACKING` の権限を `pm grant` で付与
+- 順に実行: `--ez selfcheck true --ez grid true` → 各 `--es fakeState walking|stopped|fast|nofix` でキャプチャ。それぞれ `am start -S` で起動し直し、必要な秒数だけ待つ
+- logcat から `AuraPlacement` などの結果を集めて `build/device-check/<日時>/log.txt` に保存し、PNG を同じフォルダに取り出す
+- 最後に `PASS` / `FAIL` の一覧を標準出力にまとめ、`FAIL` が1つでもあれば終了コード 1
+- 後続のタスク（T5、T6b）が項目を足しやすい形にする（項目ごとの関数など）
+
 ## 確認手順（すべて自動で行う）
 
 1. `./gradlew test` と `./gradlew assembleDebug` が通る
 2. **状態ごとの表示の単体テスト:** 状態から見た目の仕様（クラスタの表示・非表示、不透明度、距離の色、補助行の文字列、住所の行数と色、右クラスタの直径、線と矢印の薄さ）を返す純粋な関数（例: `hudVisualSpecFor(state)`）を作り、上の表のすべてのセルを単体テストで確かめる
 3. **Compose UI テスト（Robolectric）:** 左クラスタの Composable を4つの状態で表示し、出ている文字列（`1.24` `km` `歩行 18:42` `経過 21:05 ・ 15'05"/km` `GPS 測位中…` `高速移動中のため非表示` と住所）と、高速移動のときに距離などが出ていないことを確かめる
 4. 実機で、デバッグビルドだけの intent extra で状態を固定して起動できるようにする（`--es fakeState walking|stopped|fast|nofix`。距離・時間・住所はダミー値）。4つの状態と `--ez grid true` のそれぞれでクラッシュしないことを確かめる
-5. T2 で作ったアプリ内キャプチャで、4つの状態の左クラスタと右クラスタ、角度ガイドの中身を PNG にして `build/device-shots/` に取り出し、自分で開いて、文字・色・透明な背景が仕様どおりかを確かめる
-6. `--ez selfcheck true` で配置の自己診断を走らせ、すべて `PASS` にする
+5. T2 で作ったアプリ内キャプチャで、4つの状態の左クラスタと右クラスタ、角度ガイドの中身を PNG にして取り出し、自分で開いて、文字・色・透明な背景が仕様どおりかを確かめる。非装着だと空間 UI が出ないので、**パネルの中身の Composable は 2D の画面でも同じものを表示してキャプチャできるようにする**（例: 非装着時やスマホでは、左クラスタと右クラスタの中身を 2D の画面に並べる）。これで非装着でも中身は確かめられる
+6. 装着中なら `scripts/device-check.sh` を実行して、配置の自己診断をすべて `PASS` にする。非装着なら、スクリプトが「非装着」で止まることまで確かめる
 7. 最終報告の「ユーザーに確認してほしいこと」には、自動では確かめられないことだけを書く（例: 角度ガイドの枠がグラスの表示範囲の端とおおよそ一致するか、文字が読みやすいか）
 
 ## 受け入れ条件
