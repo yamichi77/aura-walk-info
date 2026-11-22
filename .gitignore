@@ -1,0 +1,29 @@
+# Gradle / Android Studio
+.gradle/
+build/
+/captures
+.externalNativeBuild/
+.cxx/
+*.iml
+.idea/
+.kotlin/
+
+# 秘密情報（API キー・署名鍵）: 絶対にコミットしない
+local.properties
+secrets.properties
+keystore.properties
+*.jks
+*.keystore
+google-services.json
+.env
+.env.*
+
+# betterleaks のレポート出力
+betterleaks-report*
+
+# Claude Code の個人設定
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+# コミット前にステージした差分を betterleaks で検査する。
+# 使うのは PATH 上の betterleaks（language: system）。バージョンを上げるときは rev とローカルの betterleaks を揃える。
+# 初回のみ: pre-commit install
+repos:
+  - repo: https://github.com/betterleaks/betterleaks
+    rev: v1.10.1
+    hooks:
+      - id: betterleaks-system
