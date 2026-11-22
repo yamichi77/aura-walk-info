@@ -1,10 +1,10 @@
 package io.github.yamichi77.aurawalkinfo.session
 
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.FakeLocationRepository
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.haversine
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.syntheticFix
 import io.github.yamichi77.aurawalkinfo.location.AddressRepository
-import io.github.yamichi77.aurawalkinfo.location.FakeLocationRepository
 import io.github.yamichi77.aurawalkinfo.location.ReverseGeocoder
-import io.github.yamichi77.aurawalkinfo.location.haversine
-import io.github.yamichi77.aurawalkinfo.location.syntheticFix
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope

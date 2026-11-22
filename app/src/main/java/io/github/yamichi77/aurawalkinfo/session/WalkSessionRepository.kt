@@ -1,8 +1,10 @@
 package io.github.yamichi77.aurawalkinfo.session
 
 import io.github.yamichi77.aurawalkinfo.location.AddressRepository
+import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.location.DistanceCalculator
 import io.github.yamichi77.aurawalkinfo.location.DistanceTracker
+import io.github.yamichi77.aurawalkinfo.location.FixDecision
 import io.github.yamichi77.aurawalkinfo.location.LocationRepository
 import io.github.yamichi77.aurawalkinfo.location.LocationSample
 import io.github.yamichi77.aurawalkinfo.safety.MotionClassifier
@@ -17,20 +19,46 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class WalkSessionRepository(
-    private val locationRepository: LocationRepository,
-    private val addressRepository: AddressRepository,
+internal class WalkSessionInput(
+    val locations: LocationRepository,
+    val clock: Clock,
+    val addresses: (Flow<LocationSample>) -> Flow<AddressState>,
+    val ticks: Flow<Unit> = sessionTicks(),
+    val replay: Boolean = false,
+    val record: (suspend (Flow<SessionMetrics>) -> Unit)? = null,
+)
+
+internal data class SessionMetrics(
+    val elapsedSeconds: Long,
+    val motion: MotionState,
+    val averageSpeedMps: Double?,
+    val accuracyMeters: Float?,
+    val addedDistanceMeters: Double,
+    val fixDecision: FixDecision?,
+    val distanceMeters: Double,
+    val walkingTimeMillis: Long,
+    val bearingDeg: Float?,
+)
+
+class WalkSessionRepository internal constructor(
+    private val inputs: Flow<WalkSessionInput>,
     private val distanceCalculator: DistanceCalculator,
-    private val clock: Clock,
-    private val ticks: Flow<Unit> = sessionTicks(),
 ) {
+    constructor(
+        locationRepository: LocationRepository,
+        addressRepository: AddressRepository,
+        distanceCalculator: DistanceCalculator,
+        clock: Clock,
+        ticks: Flow<Unit> = sessionTicks(),
+    ) : this(flowOf(WalkSessionInput(locationRepository, clock, addressRepository::observe, ticks)), distanceCalculator)
+
     private val mutableState = MutableStateFlow(WalkSessionState())
     val state: StateFlow<WalkSessionState> = mutableState.asStateFlow()
     private var sessionJob: Job? = null
@@ -40,17 +68,26 @@ class WalkSessionRepository(
     fun start(scope: CoroutineScope): Job {
         sessionJob?.takeUnless { it.isCompleted }?.let { return it }
 
-        val startedAt = clock.elapsedRealtimeMillis()
         mutableState.value = WalkSessionState()
-        return scope.launch { runSession(startedAt) }.also { sessionJob = it }
+        return scope.launch {
+            inputs.collectLatest { runSession(it) }
+        }.also { sessionJob = it }
     }
 
-    private suspend fun runSession(startedAt: Long) = coroutineScope {
+    private suspend fun runSession(input: WalkSessionInput) = coroutineScope {
+        val clock = input.clock
+        val startedAt = clock.elapsedRealtimeMillis()
+        mutableState.value = WalkSessionState()
         val classifier = MotionClassifier(distanceCalculator)
         val distance = DistanceTracker(distanceCalculator)
         val addressPoints = Channel<LocationSample>(Channel.CONFLATED)
+        val metrics = input.record?.let { record ->
+            Channel<SessionMetrics>(Channel.BUFFERED).also { channel ->
+                launch { record(channel.receiveAsFlow()) }
+            }
+        }
         launch {
-            addressRepository.observe(addressPoints.receiveAsFlow()).collect { address ->
+            input.addresses(addressPoints.receiveAsFlow()).collect { address ->
                 mutableState.update { it.copy(address = address) }
             }
         }
@@ -60,8 +97,11 @@ class WalkSessionRepository(
         var motion = MotionState.NO_FIX
         var latest: LocationSample? = null
         var bearing: Float? = null
-        val tickEvents: Flow<LocationSample?> = ticks.map { null }
-        merge(locationRepository.locations, tickEvents).collect { incoming ->
+        var lastReportedSecond = if (input.replay) -1L else 0L
+        var reportedDistance = 0.0
+        var intervalAccuracy: Float? = null
+        var intervalDecision: FixDecision? = null
+        input.locations.sessionEvents(input.ticks).collect { incoming ->
             val now = clock.elapsedRealtimeMillis()
             val previous = latest
             val fixDeadline = previous?.let { it.elapsedRealtimeMillis + MotionThresholds.NO_FIX_MILLIS }
@@ -87,22 +127,43 @@ class WalkSessionRepository(
             } else {
                 motion = classifier.onTick(now)
             }
-            distance.update(motion, sample)
+            val decision = distance.update(motion, sample)
+            if (sample != null) {
+                intervalAccuracy = sample.accuracyMeters
+                intervalDecision = decision
+            }
 
             val fix = latest
+            val elapsed = now - startedAt
             mutableState.update {
                 it.copy(
                     distanceMeters = distance.distanceMeters,
                     walkingTimeMillis = walkingTime,
-                    elapsedMillis = now - startedAt,
+                    elapsedMillis = elapsed,
                     motionState = motion,
                     mapCenter = fix?.let { MapCenter(it.latitude, it.longitude) },
                     mapBearingDeg = bearing,
                     lastFixAccuracyMeters = fix?.accuracyMeters,
                 )
             }
+            val elapsedSeconds = elapsed / 1_000
+            if (metrics != null && (input.replay || incoming == null) && elapsedSeconds > lastReportedSecond) {
+                metrics.trySend(
+                    SessionMetrics(
+                        elapsedSeconds, motion, classifier.averageSpeedMps,
+                        if (input.replay) fix?.accuracyMeters else intervalAccuracy,
+                        distance.distanceMeters - reportedDistance, intervalDecision,
+                        distance.distanceMeters, walkingTime, bearing,
+                    ),
+                )
+                lastReportedSecond = elapsedSeconds
+                reportedDistance = distance.distanceMeters
+                intervalAccuracy = null
+                intervalDecision = null
+            }
         }
         addressPoints.close()
+        metrics?.close()
     }
 }
 

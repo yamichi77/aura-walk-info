@@ -1,5 +1,9 @@
 package io.github.yamichi77.aurawalkinfo.location
 
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.FakeLocationRepository
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.haversine
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.syntheticFix
+
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
