@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import io.github.yamichi77.aurawalkinfo.location.AddressParts
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.ui.format.FormattedDistance
 import org.junit.Assert.assertEquals
@@ -52,9 +53,24 @@ class HudVisualSpecTest {
     @Test
     fun noFixDimsDistanceAddressAndMap() {
         assertEquals(
-            clusters(0.7f, 0xFF888780, "GPS 測位中…", "みほん市試験町1丁目", 1, 0xFF888780, 8f, 0.3f, 0xFF888780),
+            clusters(0.7f, 0xFF888780, "GPS 測位中…", "みほん市試験町1丁目", 1, 0xFF888780, 8f, 0.3f, 0xFF888780,
+                mapOpacity = 0.3f),
             hudVisualSpecFor(hudTestState(MotionState.NO_FIX)),
         )
+    }
+
+    @Test
+    fun mapUsesLatestCenterAndRetainsBearingAcrossLossOfFix() {
+        val center = MapCenter(0.1, 0.2)
+        val state = hudTestState(MotionState.NO_FIX)
+        val withoutFix = hudVisualSpecFor(state) as HudVisualSpec.Clusters
+        assertEquals(null, withoutFix.mapCenter)
+        assertEquals(0f, withoutFix.mapBearingDeg)
+
+        val withLastFix = hudVisualSpecFor(state.copy(mapCenter = center, mapBearingDeg = 90f)) as HudVisualSpec.Clusters
+        assertEquals(center, withLastFix.mapCenter)
+        assertEquals(90f, withLastFix.mapBearingDeg)
+        assertEquals(0.3f, withLastFix.mapOpacity)
     }
 
     @Test
@@ -68,9 +84,9 @@ class HudVisualSpecTest {
 
     private fun clusters(
         opacity: Float, distanceColor: Long, detail: String?, address: String, lines: Int, addressColor: Long,
-        diameter: Float, lineOpacity: Float, arrowColor: Long,
+        diameter: Float, lineOpacity: Float, arrowColor: Long, mapOpacity: Float = opacity,
     ) = HudVisualSpec.Clusters(
         opacity, FormattedDistance("1.24", "km"), Color(distanceColor), "歩行 18:42", detail, address,
-        lines, Color(addressColor), diameter, lineOpacity, Color(arrowColor),
+        lines, Color(addressColor), diameter, lineOpacity, Color(arrowColor), mapOpacity = mapOpacity,
     )
 }

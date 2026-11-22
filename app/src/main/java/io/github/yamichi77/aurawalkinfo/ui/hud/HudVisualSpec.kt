@@ -3,6 +3,7 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import androidx.compose.ui.graphics.Color
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.format.FormattedDistance
@@ -35,6 +36,9 @@ internal sealed interface HudVisualSpec {
         val mapDiameter: Float,
         val mapLineOpacity: Float,
         val mapArrowColor: Color,
+        val mapCenter: MapCenter? = null,
+        val mapBearingDeg: Float = 0f,
+        val mapOpacity: Float = opacity,
     ) : HudVisualSpec
 }
 
@@ -42,6 +46,7 @@ internal fun hudVisualSpecFor(state: WalkSessionState): HudVisualSpec {
     if (state.motionState == MotionState.FAST) return HudVisualSpec.Fast
     val stopped = state.motionState == MotionState.STOPPED
     val noFix = state.motionState == MotionState.NO_FIX
+    val opacity = if (stopped) 1f else 0.7f
     val detail = when {
         noFix -> "GPS 測位中…"
         stopped -> listOfNotNull(
@@ -51,7 +56,7 @@ internal fun hudVisualSpecFor(state: WalkSessionState): HudVisualSpec {
         else -> null
     }
     return HudVisualSpec.Clusters(
-        opacity = if (stopped) 1f else 0.7f,
+        opacity = opacity,
         distance = formatDistance(state.distanceMeters),
         distanceColor = if (noFix) HudDimmed else HudText,
         walkingTime = formatWalkingTime(state.walkingTimeMillis),
@@ -62,5 +67,8 @@ internal fun hudVisualSpecFor(state: WalkSessionState): HudVisualSpec {
         mapDiameter = if (stopped) Layout.stoppedDiameter else Layout.walkingDiameter,
         mapLineOpacity = if (noFix) 0.3f else 0.4f,
         mapArrowColor = if (noFix) HudDimmed else HudArrow,
+        mapCenter = state.mapCenter,
+        mapBearingDeg = state.mapBearingDeg ?: 0f,
+        mapOpacity = if (noFix) 0.3f else opacity,
     )
 }
