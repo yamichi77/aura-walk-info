@@ -61,5 +61,7 @@ internal class QuantumCountdownFrame(elapsedMillis: Float) : QuantumParticleFram
     val particleAlpha = (0.25f + 0.65f * convergence) * (1f - dispersal)
     val correctOutlineAlpha = (0.22f + 0.58f * convergence) * (1f - dispersal)
     val otherOutlineAlpha = 0.26f * (1f - gathering)
-    val electronAngle = ((elapsed / COUNTDOWN_SECOND_MILLIS - 0.25f) * 2 * PI).toFloat()
+    val electronAngle = quantumOrbitAngle(elapsed / COUNTDOWN_SECOND_MILLIS)
 }
+
+internal fun quantumOrbitAngle(progress: Float) = ((progress - 0.25f) * 2 * PI).toFloat()

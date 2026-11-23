@@ -44,6 +44,54 @@ class BigMapControlTest {
     }
 
     @Test
+    fun startingAndFinishingInputWhileWalkingOrWithoutFixNeverExtendTheDeadline() {
+        for (motion in listOf(MotionState.WALKING, MotionState.NO_FIX)) {
+            val opened = closed.tap(HudTarget.MAP, 0, motion)
+            val entering = opened.advance(4_000, motion, destinationInput = true)
+            assertEquals(10_000L, entering.closesAt)
+            assertTrue(entering.advance(9_999, motion, destinationInput = true).isOpen)
+            assertFalse(entering.advance(10_000, motion, destinationInput = true).isOpen)
+            assertEquals(10_000L, entering.advance(7_000, motion).closesAt)
+        }
+    }
+
+    @Test
+    fun stoppedInputPausesAndFinishingWhileStoppedStartsAFullThirtySeconds() {
+        val stopped = MotionState.STOPPED
+        val paused = closed.tap(HudTarget.MAP, 0, stopped).advance(1_000, stopped, destinationInput = true)
+        assertTrue(paused.isOpen)
+        assertEquals(null, paused.closesAt)
+        assertEquals(paused, paused.advance(40_000, stopped, destinationInput = true))
+        assertEquals(70_000L, paused.advance(40_000, stopped).closesAt)
+    }
+
+    @Test
+    fun movingDuringPausedInputStartsTenSecondsAndFastClosesImmediately() {
+        val stopped = MotionState.STOPPED
+        val paused = closed.tap(HudTarget.MAP, 0, stopped).advance(1_000, stopped, destinationInput = true)
+        for (motion in listOf(MotionState.WALKING, MotionState.NO_FIX)) {
+            val resumed = paused.advance(40_000, motion, destinationInput = true)
+            assertEquals(50_000L, resumed.closesAt)
+            assertTrue(resumed.advance(49_999, motion, destinationInput = true).isOpen)
+            assertFalse(resumed.advance(50_000, motion, destinationInput = true).isOpen)
+            assertEquals(50_000L, paused.advance(40_000, motion).closesAt)
+        }
+        assertFalse(paused.advance(2_000, MotionState.FAST, destinationInput = true).isOpen)
+    }
+
+    @Test
+    fun stoppingWhileEnteringDestinationPausesUntilMovementResumes() {
+        val walking = MotionState.WALKING
+        val stopped = MotionState.STOPPED
+        val entering = closed.tap(HudTarget.MAP, 0, walking).advance(1_000, walking, destinationInput = true)
+        val paused = entering.advance(5_000, stopped, destinationInput = true)
+        assertEquals(null, paused.closesAt)
+        assertTrue(paused.advance(40_000, stopped, destinationInput = true).isOpen)
+        val resumed = paused.advance(40_000, walking, destinationInput = true)
+        assertEquals(50_000L, resumed.closesAt)
+    }
+
+    @Test
     fun fastClosesImmediatelyAndRefusesToOpenAndBothTargetsCloseManually() {
         val fast = MotionState.FAST
         val stopped = MotionState.STOPPED

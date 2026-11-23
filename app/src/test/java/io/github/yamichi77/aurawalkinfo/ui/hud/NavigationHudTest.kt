@@ -123,12 +123,12 @@ class NavigationHudTest {
             compose.runOnIdle { f.failSearch(error) }
             checkMessage(f, message)
         }
-        assertEquals(30_000L, f.map.closesAt)
+        assertEquals(f.clock.elapsedRealtimeMillis() + 30_000L, f.map.closesAt)
     }
 
     @Test
     fun speechTimesOutAtEightSecondsAndMapCloseAlsoCancelsListening() {
-        val f = Fixture()
+        val f = Fixture(MotionState.STOPPED)
         render(f)
         tap("map")
         tap("nav_destination")
@@ -136,27 +136,34 @@ class NavigationHudTest {
         text("話してください").assertIsDisplayed()
         advance(f, 1)
         text(SpeechNotRecognized).assertIsDisplayed()
-        advance(f, 2_000)
+        advance(f, 3_000)
         text(SpeechNotRecognized).assertDoesNotExist()
-        tap("map")
-        advance(f, 5_000)
+        f.recognized = CompletableDeferred()
         tap("nav_destination")
         text("話してください").assertIsDisplayed()
-        advance(f, 5_000)
+        tap("bigmap")
         text("話してください").assertDoesNotExist()
         assertEquals(2, f.speechExits)
         assertEquals(NavState.Idle, f.nav.state.value)
     }
 
     @Test
-    fun timeoutDuringSearchDiscardsLateCandidates() {
-        val f = Fixture()
+    fun searchKeepsStoppedMapOpenPastThirtySecondsThenWalkingClosesItAndDiscardsLateCandidates() {
+        val f = Fixture(MotionState.STOPPED)
         render(f)
         tap("map")
         advance(f, 9_000)
         speak(f)
         text("検索中…").assertIsDisplayed()
-        advance(f, 1_000)
+        advance(f, 31_000)
+        text("検索中…").assertIsDisplayed()
+        compose.runOnIdle {
+            f.motion = MotionState.WALKING
+            f.refreshMap()
+        }
+        advance(f, 9_999)
+        text("検索中…").assertIsDisplayed()
+        advance(f, 1)
         compose.runOnIdle { f.finishSearch() }
         text("合成候補1").assertDoesNotExist()
         text("検索中…").assertDoesNotExist()
@@ -164,8 +171,8 @@ class NavigationHudTest {
     }
 
     @Test
-    fun timeoutDuringRoutingDiscardsLateRouteAndCandidateTapDoesNotMoveDeadline() {
-        val f = Fixture()
+    fun timeoutDuringRoutingClosesOnlyTheMapAndLateRouteStartsGuidance() {
+        val f = Fixture(MotionState.STOPPED)
         render(f)
         tap("map")
         advance(f, 9_000)
@@ -173,33 +180,36 @@ class NavigationHudTest {
         compose.runOnIdle { f.finishSearch() }
         tap("nav_candidate_1")
         text("経路を取得中…").assertIsDisplayed()
-        assertEquals(10_000L, f.map.closesAt)
-        advance(f, 1_000)
-        compose.runOnIdle { f.finishRoute() }
+        assertEquals(null, f.map.closesAt)
+        compose.runOnIdle {
+            f.motion = MotionState.WALKING
+            f.refreshMap()
+        }
+        advance(f, 10_000)
         text("経路を取得中…").assertDoesNotExist()
+        compose.onNodeWithTag("bigmap").assertDoesNotExist()
+        compose.runOnIdle {
+            f.fixes.tryEmit(syntheticFix(f.clock.elapsedRealtimeMillis()))
+            f.finishRoute()
+        }
+        text("40m先 右").assertIsDisplayed()
+        text("残り 91m・2分").assertIsDisplayed()
         text("ナビ終了").assertDoesNotExist()
-        assertEquals(NavState.Idle, f.nav.state.value)
     }
 
     @Test
-    fun resultAtTheDeadlineCannotStartGuidanceBeforeTheCloseTimerRuns() {
+    fun manuallyClosingDuringSearchDiscardsLateCandidates() {
         val f = Fixture()
         render(f)
         tap("map")
-        advance(f, 9_000)
         speak(f)
+        text("検索中…").assertIsDisplayed()
+        tap("bigmap")
         compose.runOnIdle { f.finishSearch() }
-        tap("nav_candidate_1")
-        compose.runOnIdle {
-            f.scope.advanceTimeBy(1_000)
-            assertTrue(f.map.isOpen)
-            f.fixes.tryEmit(syntheticFix(10_000))
-            f.finishRoute()
-            assertEquals(NavState.Idle, f.nav.state.value)
-            f.scope.runCurrent()
-        }
-        text("経路を取得中…").assertDoesNotExist()
-        text("40m先 右").assertDoesNotExist()
+        tap("map")
+        text("合成候補1").assertDoesNotExist()
+        text("目的地").assertIsDisplayed()
+        assertEquals(NavState.Idle, f.nav.state.value)
     }
 
     @Test
@@ -341,7 +351,7 @@ class NavigationHudTest {
                 suspendCoroutine { route = it }
         }
         val nav = NavRepository(scope, service, fixes, clock)
-        val input = DestinationInput(
+        val input: DestinationInput = DestinationInput(
             scope, nav, DestinationSpeech { partial ->
                 partial("合成の途中結果")
                 try {
@@ -350,27 +360,41 @@ class NavigationHudTest {
                     speechExits++
                 }
             },
-            { permission }, clock,
-        ) { map.advance(clock.elapsedRealtimeMillis(), motion).isOpen }
+            { permission }, clock, onInputChanged = ::refreshMap,
+        ) { mapAcceptsInput() }
+
+        private fun mapAcceptsInput() =
+            map.advance(clock.elapsedRealtimeMillis(), motion, input.enteringDestination).isOpen
 
         fun tap(target: HudTarget) {
             val now = clock.elapsedRealtimeMillis()
+            refreshMap()
             if (target.isDestinationInput) {
                 fixes.tryEmit(syntheticFix(now))
                 input.tap(target)
-            } else updateMap(map.tap(target, now, motion))
+            } else updateMap(map.tap(target, now, motion, input.enteringDestination))
+            scheduleClose()
+        }
+
+        fun refreshMap() {
+            updateMap(map.advance(clock.elapsedRealtimeMillis(), motion, input.enteringDestination))
+            scheduleClose()
+        }
+
+        private fun scheduleClose() {
             closeTimer?.cancel()
             map.closesAt?.let { deadline ->
                 closeTimer = scope.launch {
-                    delay(deadline - now)
-                    updateMap(map.advance(clock.elapsedRealtimeMillis(), motion))
+                    delay(deadline - clock.elapsedRealtimeMillis())
+                    refreshMap()
                 }
             }
         }
 
         private fun updateMap(next: BigMapControl) {
-            if (map.isOpen && !next.isOpen) input.close()
+            val wasOpen = map.isOpen
             map = next
+            if (wasOpen && !next.isOpen) input.onMapClosed()
         }
 
         fun finishSearch() = completeSearch(Result.success(candidates))

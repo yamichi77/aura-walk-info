@@ -155,7 +155,7 @@ internal fun QuantumMap(
             content(Modifier.matchParentSize().graphicsLayer { alpha = animation?.contentAlpha ?: 1f })
         }
         if (animation != null) {
-            val particles = remember { mapParticles() }
+            val particles = remember { quantumRingParticles(60) }
             Canvas(Modifier.matchParentSize().testTag(if (large) "quantum-bigmap" else "quantum-map")) {
                 val rim = size.minDimension * 0.5f - 1.dp.toPx()
                 // Leave room to disperse outward inside the existing circular XR panel.
@@ -166,10 +166,10 @@ internal fun QuantumMap(
     }
 }
 
-private fun mapParticles(): List<QuantumParticle> {
+internal fun quantumRingParticles(count: Int): List<QuantumParticle> {
     val random = Random(13)
-    return List(60) { index ->
-        val angle = (2 * PI * index / 60).toFloat()
+    return List(count) { index ->
+        val angle = (2 * PI * index / count).toFloat()
         QuantumParticle(QuantumPoint(cos(angle), sin(angle)), random)
     }
 }
@@ -214,7 +214,7 @@ internal fun quantumLabelModifier(
 
 private data class QuantumGlyph(val offset: Offset, val particles: List<QuantumParticle>)
 
-private fun DrawScope.drawQuantumParticles(
+internal fun DrawScope.drawQuantumParticles(
     particles: List<QuantumParticle>,
     animation: QuantumAnimation,
     origin: Offset,

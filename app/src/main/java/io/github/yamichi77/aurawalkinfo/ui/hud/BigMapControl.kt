@@ -7,23 +7,31 @@ internal enum class HudTarget {
     NAV_DESTINATION, NAV_CANDIDATE_1, NAV_CANDIDATE_2, NAV_CANDIDATE_3, NAV_CANCEL,
 }
 
-internal data class BigMapControl(val closesAt: Long? = null) {
-    val isOpen: Boolean get() = closesAt != null
+internal data class BigMapControl(
+    val closesAt: Long? = null,
+    private val enteringDestination: Boolean = false,
+) {
+    val isOpen: Boolean get() = closesAt != null || enteringDestination
 
-    fun advance(now: Long, motion: MotionState): BigMapControl {
-        val deadline = closesAt ?: return this
-        if (now >= deadline || motion == MotionState.FAST) return BigMapControl()
-        return when (motion) {
-            MotionState.WALKING, MotionState.NO_FIX -> BigMapControl(minOf(deadline, now + 10_000))
-            else -> this
+    fun advance(now: Long, motion: MotionState, destinationInput: Boolean = false): BigMapControl {
+        if (!isOpen) return this
+        if (motion == MotionState.FAST || closesAt?.let { now >= it } == true) return BigMapControl()
+        if (motion == MotionState.STOPPED) {
+            return when {
+                destinationInput -> BigMapControl(enteringDestination = true)
+                enteringDestination -> BigMapControl(deadline(now, motion))
+                else -> this
+            }
         }
+        val movementDeadline = deadline(now, motion)
+        return BigMapControl(minOf(closesAt ?: movementDeadline, movementDeadline), destinationInput)
     }
 
-    fun tap(target: HudTarget, now: Long, motion: MotionState): BigMapControl {
-        val current = advance(now, motion)
+    fun tap(target: HudTarget, now: Long, motion: MotionState, destinationInput: Boolean = false): BigMapControl {
+        val current = advance(now, motion, destinationInput)
         return when (target) {
             HudTarget.MAP -> if (current.isOpen || motion == MotionState.FAST) current else {
-                BigMapControl(now + if (motion == MotionState.STOPPED) 30_000 else 10_000)
+                BigMapControl(deadline(now, motion)).advance(now, motion, destinationInput)
             }
             HudTarget.BIGMAP, HudTarget.OUTSIDE -> BigMapControl()
             HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP_MODE -> current
@@ -31,4 +39,7 @@ internal data class BigMapControl(val closesAt: Long? = null) {
             HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_CANCEL -> current
         }
     }
+
+    private fun deadline(now: Long, motion: MotionState) =
+        now + if (motion == MotionState.STOPPED) 30_000 else 10_000
 }

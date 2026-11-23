@@ -34,12 +34,24 @@ internal class DestinationInput(
     private val speech: DestinationSpeech,
     private val requestMicrophone: suspend () -> Boolean,
     private val clock: Clock,
+    private val onInputChanged: () -> Unit = {},
     private val mapAcceptsInput: () -> Boolean,
 ) {
     var prompt by mutableStateOf<DestinationPrompt>(DestinationPrompt.Map)
         private set
+    val enteringDestination: Boolean get() = when (prompt) {
+        is DestinationPrompt.Listening, DestinationPrompt.Searching, is DestinationPrompt.Candidates,
+        DestinationPrompt.Routing, is DestinationPrompt.Message -> true
+        else -> false
+    }
     private var work: Job? = null
     private var confirmUntil = 0L
+
+    private fun show(next: DestinationPrompt) {
+        val wasEntering = enteringDestination
+        prompt = next
+        if (enteringDestination != wasEntering) onInputChanged()
+    }
 
     fun tap(target: HudTarget) {
         if (!mapAcceptsInput()) return
@@ -66,19 +78,23 @@ internal class DestinationInput(
         }
     }
 
+    fun onMapClosed() {
+        if (prompt != DestinationPrompt.Routing) close()
+    }
+
     fun close() {
         work?.cancel()
         work = null
         when (prompt) {
-            DestinationPrompt.Searching, is DestinationPrompt.Candidates, DestinationPrompt.Routing ->
+            DestinationPrompt.Searching, is DestinationPrompt.Candidates ->
                 if (!nav.state.value.isNavigationActive) nav.cancel()
             else -> Unit
         }
-        prompt = DestinationPrompt.Map
+        show(DestinationPrompt.Map)
     }
 
     private fun listen() {
-        prompt = DestinationPrompt.Permission
+        show(DestinationPrompt.Permission)
         work = scope.launch {
             val permitted = requestMicrophone()
             if (!mapAcceptsInput()) return@launch
@@ -86,10 +102,10 @@ internal class DestinationInput(
                 showMessage(MicrophoneDenied)
                 return@launch
             }
-            prompt = DestinationPrompt.Listening()
+            show(DestinationPrompt.Listening())
             val result = speech.listenWithDeadline { partial ->
                 if (prompt is DestinationPrompt.Listening && mapAcceptsInput()) {
-                    prompt = DestinationPrompt.Listening(partial)
+                    show(DestinationPrompt.Listening(partial))
                 }
             }
             if (!mapAcceptsInput()) return@launch
@@ -101,12 +117,12 @@ internal class DestinationInput(
     }
 
     private suspend fun search(query: String) {
-        prompt = DestinationPrompt.Searching
+        show(DestinationPrompt.Searching)
         nav.search(query)
         val result = nav.state.first { it is NavState.Candidates || it is NavState.Error }
         if (!mapAcceptsInput()) return
         when (result) {
-            is NavState.Candidates -> prompt = DestinationPrompt.Candidates(result.items)
+            is NavState.Candidates -> show(DestinationPrompt.Candidates(result.items))
             is NavState.Error -> {
                 nav.cancel()
                 showMessage(result.reason.hudMessage(searching = true))
@@ -116,32 +132,35 @@ internal class DestinationInput(
     }
 
     private fun route(candidate: NavCandidate) {
-        prompt = DestinationPrompt.Routing
+        show(DestinationPrompt.Routing)
+        nav.selectCandidate(candidate)
         work = scope.launch {
-            nav.selectCandidate(candidate, mapAcceptsInput)
             val result = nav.state.first { it.isNavigationActive || it is NavState.Error || it == NavState.Idle }
-            if (!mapAcceptsInput()) return@launch
             if (result is NavState.Error) {
                 nav.cancel()
-                showMessage(result.reason.hudMessage(searching = false))
-            } else prompt = DestinationPrompt.Map
+                if (mapAcceptsInput()) {
+                    showMessage(result.reason.hudMessage(searching = false))
+                    return@launch
+                }
+            }
+            show(DestinationPrompt.Map)
         }
     }
 
     private fun confirmEnd() {
         work?.cancel()
         confirmUntil = clock.elapsedRealtimeMillis() + 3_000
-        prompt = DestinationPrompt.ConfirmEnd
+        show(DestinationPrompt.ConfirmEnd)
         work = scope.launch {
             delay(3_000)
-            prompt = DestinationPrompt.Map
+            show(DestinationPrompt.Map)
         }
     }
 
     private suspend fun showMessage(text: String) {
-        prompt = DestinationPrompt.Message(text)
+        show(DestinationPrompt.Message(text))
         delay(3_000)
-        prompt = DestinationPrompt.Map
+        show(DestinationPrompt.Map)
     }
 }
 
