@@ -23,6 +23,7 @@ import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.AnchorSpace
 import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
+import io.github.yamichi77.aurawalkinfo.geospatial.VpsFix
 import io.github.yamichi77.aurawalkinfo.heading.HeadingEstimator
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
@@ -89,6 +90,8 @@ internal fun SpatialMarks(
                 var fixEye: Vector3? = null
                 var lastEye: Vector3? = null
                 var nextPositionAt = 0L
+                var wasVps = false
+                var placementFailure: MarkReason? = null
                 snapshotFlow { spatialUpdateMode(hasTargets, settings.spatialMarksEnabled, walk.motionState) }
                     .collectLatest { mode ->
                         if (mode == SpatialUpdateMode.FAST) {
@@ -110,7 +113,9 @@ internal fun SpatialMarks(
                             if (mode == SpatialUpdateMode.ACTIVE) {
                                 val sample = walk
                                 val point = fix
-                                val north = settings.northOverride ?: heading.estimate(now)
+                                val gpsNorth = settings.northOverride ?: heading.estimate(now)
+                                val vps = if (settings.northOverride == null) heading.geospatial.fix(now) else null
+                                val north = vps?.north ?: gpsNorth
                                 reason = spatialBlocker(
                                     sample.motionState, settings.spatialMarksEnabled,
                                     eye != null && !settings.simulateTrackingLoss, north, point, sample.lastFixAccuracyMeters,
@@ -128,18 +133,23 @@ internal fun SpatialMarks(
                                 }
 
                                 if (reason == null && targets?.any { it.target != null } == true) {
-                                    val referenceEye = fixEye
+                                    val gpsFix = fixEye?.let { referenceEye ->
+                                        gpsNorth?.let { SpatialFix(checkNotNull(point), referenceEye.markVector(), it.offsetDegrees) }
+                                    }
+                                    val fallbackReason = spatialBlocker(
+                                        sample.motionState, settings.spatialMarksEnabled,
+                                        eye != null && !settings.simulateTrackingLoss, gpsNorth, point, sample.lastFixAccuracyMeters,
+                                    ) ?: MarkReason.TRACKING_LOST.takeIf { gpsFix == null }
                                     reason = when {
                                         !anchorGranted -> MarkReason.ANCHOR_UNAVAILABLE
-                                        referenceEye == null -> MarkReason.TRACKING_LOST
-                                        now < nextPositionAt -> null
+                                        vps == null && fallbackReason != null -> fallbackReason
+                                        now < nextPositionAt && wasVps == (vps != null) -> placementFailure
                                         else -> {
                                             nextPositionAt = now + MARK_POSITION_INTERVAL_MS
+                                            wasVps = vps != null
                                             scene.position(
-                                                checkNotNull(eye),
-                                                SpatialFix(checkNotNull(point), referenceEye.markVector(), checkNotNull(north).offsetDegrees),
-                                                targets, now,
-                                            )
+                                                checkNotNull(eye), gpsFix, vps, fallbackReason, targets, now,
+                                            ).also { placementFailure = it }
                                         }
                                     }
                                 }
@@ -166,6 +176,7 @@ private class SpatialMarkScene(private val session: Session, private val debug: 
     private var anchorSpace: AnchorSpace? = null
     private var anchorFailure = false
     private var prepared = false
+    private var lastVpsProjection: Boolean? = null
     val isFading get() = marks.any { it.isFading }
     val hasVisibleOrFadingMarks get() = marks.any { it.opacity > 0f || it.isFading }
 
@@ -173,7 +184,10 @@ private class SpatialMarkScene(private val session: Session, private val debug: 
         anchor?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING && anchorSpace?.state == AnchorSpace.State.ANCHORED }
             ?.pose
 
-    suspend fun position(eye: Vector3, fix: SpatialFix, decisions: List<MarkDecision>, now: Long): MarkReason? {
+    suspend fun position(
+        eye: Vector3, gpsFix: SpatialFix?, vps: VpsFix?, fallbackReason: MarkReason?,
+        decisions: List<MarkDecision>, now: Long,
+    ): MarkReason? {
         if (anchorFailure) return MarkReason.ANCHOR_UNAVAILABLE
         if (anchor?.state?.value?.trackingState == TrackingState.STOPPED) {
             close()
@@ -203,13 +217,31 @@ private class SpatialMarkScene(private val session: Session, private val debug: 
             // Read the safety inputs again after the suspension before placing anything.
             return MarkReason.ANCHOR_UNAVAILABLE
         }
-        marks.zip(decisions).forEach { (mark, decision) ->
-            val target = decision.target ?: return@forEach
-            val world = GpsSpatialProjector.project(fix, target.point, mark.kind.baseHeight)
+        val vpsPositions = vps?.let { fix ->
+            marks.zip(decisions).map { (mark, decision) ->
+                val target = decision.target ?: return@map null
+                fix.projector.project(null, target.point, mark.kind.baseHeight) ?: return@let null
+            }
+        }
+        val usingVps = vpsPositions != null
+        if (vps != null || lastVpsProjection == true) {
+            val projection = when {
+                usingVps -> "source=VPS reason=READY"
+                vps != null -> "source=GPS reason=CONVERSION_FAILED"
+                else -> "source=GPS reason=VPS_UNAVAILABLE"
+            }
+            if (lastVpsProjection != usingVps) Log.i("AuraGeo", "marks $projection")
+        }
+        lastVpsProjection = usingVps.takeIf { vps != null }
+        if (!usingVps && fallbackReason != null) return fallbackReason
+        val northOffset = if (usingVps) checkNotNull(vps).north.offsetDegrees else checkNotNull(gpsFix).northOffsetDegrees
+        marks.zip(decisions).forEachIndexed { index, (mark, decision) ->
+            val target = decision.target ?: return@forEachIndexed
+            val world = vpsPositions?.get(index) ?: GpsSpatialProjector.project(gpsFix, target.point, mark.kind.baseHeight)
             val center = fromPerception.transformPoint(world.vector3()).markVector()
-            val forward = fromPerception.transformVector(markForward(target, fix.northOffsetDegrees).vector3()).markVector()
+            val forward = fromPerception.transformVector(markForward(target, northOffset).vector3()).markVector()
             val up = fromPerception.transformVector(Vector3(0f, 1f, 0f)).markVector()
-            mark.position(target, center, forward, up, now)
+            mark.position(target, center, forward, up, usingVps, now)
         }
         return null
     }
@@ -259,13 +291,16 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
         created.initialize(session, parent)
     }
 
-    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, up: MarkVector, now: Long) {
+    private var usingVps = false
+
+    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, up: MarkVector, usingVps: Boolean, now: Long) {
         if (!sameMark(this.target, target)) {
             position = SmoothedMarkPosition(center)
             fade = MarkFade()
         } else {
-            position?.retarget(center, now)
+            position?.retarget(center, now, sourceChanged = this.usingVps != usingVps)
         }
+        this.usingVps = usingVps
         this.target = target
         this.forward = forward
         this.up = up

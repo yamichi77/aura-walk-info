@@ -72,7 +72,7 @@ internal fun SpatialSkyBand(
             active = sampling,
             read = { smoother ->
                 val now = SystemClock.elapsedRealtime()
-                val north = latestOverride ?: heading.estimate(now)
+                val north = latestOverride ?: heading.displayNorth(now)
                 val pose = heading.poseAt(now)?.takeIf { it.tracking == HeadTracking.TRACKING }
                 val rawBearing = pose?.yawDegrees?.let { north?.bearingForYaw(it) }
                 SkySample(latestTargets, north, smoother.update(rawBearing, now), rawBearing)

@@ -80,6 +80,7 @@ internal fun HudScene(
     skyBandSettings: SkyBandSettings,
     headingTracking: HeadingTracking,
     skyBandTargets: SkyBandTargets,
+    showGeospatialConsent: Boolean = false,
 ) {
     val session = LocalSession.current
     if (session == null) {
@@ -189,7 +190,7 @@ internal fun HudScene(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
                         showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
                         !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock, bigMapMode,
-                        headingTracking,
+                        headingTracking, skyBandSettings.takeIf { showGeospatialConsent },
                     )
                 }
             }
@@ -218,6 +219,7 @@ private fun SpatialHudPanels(
     wallClock: WallClock,
     bigMapMode: BigMapMode,
     headingTracking: HeadingTracking?,
+    geospatialSettings: SkyBandSettings?,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -245,14 +247,21 @@ private fun SpatialHudPanels(
             session, HudPanel.LEFT, HudPlacement.statsWidthMeters, HudPlacement.statsHeightMeters,
             dpPerMeter, scale, check, motionOpacity,
         ) {
-            StatsPanel(
-                spec, locationDenied, Layout.textScale(physicalDpPerMeter),
-                Modifier.fillMaxSize().clipToBounds().hudClick(HudTarget.LEFT, onTap, inputEnabled)
-                    .capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
-                onNoticeTimeout,
-                quantum.left,
-                wallClock,
-            )
+            val textScale = Layout.textScale(physicalDpPerMeter)
+            if (geospatialSettings != null && geospatialSettings.geospatialConsent == null &&
+                spec is HudVisualSpec.Clusters && !spec.showSafetyNotice && !showBigMap && countdown == null
+            ) {
+                GeospatialConsentPanel(geospatialSettings, textScale, inputEnabled)
+            } else {
+                StatsPanel(
+                    spec, locationDenied, textScale,
+                    Modifier.fillMaxSize().clipToBounds().hudClick(HudTarget.LEFT, onTap, inputEnabled)
+                        .capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
+                    onNoticeTimeout,
+                    quantum.left,
+                    wallClock,
+                )
+            }
         }
 
         if (countdown != null) {

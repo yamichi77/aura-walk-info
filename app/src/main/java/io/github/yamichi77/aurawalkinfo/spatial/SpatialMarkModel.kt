@@ -36,14 +36,15 @@ internal data class SpatialFix(val point: NavPoint, val eye: MarkVector, val nor
 
 /** Returns positions in ARCore perception space. Renderers can bind these to a local anchor. */
 internal fun interface SpatialProjector {
-    fun project(fix: SpatialFix, target: NavPoint, heightAboveGroundMeters: Double): MarkVector
+    fun project(fix: SpatialFix?, target: NavPoint, heightAboveGroundMeters: Double): MarkVector?
 }
 
 internal object GpsSpatialProjector : SpatialProjector {
     private const val EARTH_RADIUS_METERS = 6_371_000.0
     const val EYE_HEIGHT_METERS = 1.6
 
-    override fun project(fix: SpatialFix, target: NavPoint, heightAboveGroundMeters: Double): MarkVector {
+    override fun project(fix: SpatialFix?, target: NavPoint, heightAboveGroundMeters: Double): MarkVector {
+        requireNotNull(fix)
         val longitudeDelta = (target.longitude - fix.point.longitude + 540.0) % 360.0 - 180.0
         val east = EARTH_RADIUS_METERS * Math.toRadians(longitudeDelta) *
             cos(Math.toRadians((target.latitude + fix.point.latitude) / 2))
@@ -164,8 +165,8 @@ internal class SmoothedMarkPosition(initial: MarkVector) {
     private var target = initial
     private var startedAt = 0L
 
-    fun retarget(position: MarkVector, now: Long) {
-        if ((position - target).length() < 1.0) return
+    fun retarget(position: MarkVector, now: Long, sourceChanged: Boolean = false) {
+        if (!sourceChanged && (position - target).length() < 1.0) return
         from = at(now)
         target = position
         startedAt = now

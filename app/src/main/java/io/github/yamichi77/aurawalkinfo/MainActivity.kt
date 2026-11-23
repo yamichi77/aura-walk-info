@@ -35,7 +35,10 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
 import io.github.yamichi77.aurawalkinfo.diagnostics.rememberSkyBandSettings
 import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
+import io.github.yamichi77.aurawalkinfo.geospatial.ObserveGeospatial
+import io.github.yamichi77.aurawalkinfo.geospatial.vpsDemand
 import io.github.yamichi77.aurawalkinfo.nav.AndroidDestinationSpeech
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.spatial.SCENE_UNDERSTANDING_COARSE
@@ -226,6 +229,17 @@ class MainActivity : ComponentActivity() {
                         container.headPoses, container.headingTracking,
                         enabled = spatial && headTrackingGranted && (debug.fakeState == null || debug.selfCheck),
                     )
+                    val geospatialEligible = spatial && headTrackingGranted && !denied && debug.fakeState == null
+                    val geospatialPoint = state.mapCenter?.takeIf {
+                        state.lastFixTimeMillis != null && it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0
+                    }?.let { NavPoint(it.latitude, it.longitude) }
+                    ObserveGeospatial(
+                        container.headingTracking.geospatial, geospatialEligible, skyBandSettings.geospatialConsent,
+                        geospatialPoint, geospatialPoint != null && spec is HudVisualSpec.Clusters &&
+                            !spec.showSafetyNotice && vpsDemand(
+                                navState, pics != null && (skyBandSettings.enabled || skyBandSettings.spatialMarksEnabled),
+                            ),
+                    )
                     if (debug.fakeState != null || debug.grid || debug.capture) {
                         LaunchedEffect(spatial, headTrackingGranted) {
                             val route = when {
@@ -253,6 +267,7 @@ class MainActivity : ComponentActivity() {
                                         navState,
                                         pics.takeIf { (spec as? HudVisualSpec.Clusters)?.pics != null },
                                     ),
+                                    showGeospatialConsent = geospatialEligible,
                                 )
                             }
                         } else {

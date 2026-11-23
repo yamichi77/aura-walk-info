@@ -18,6 +18,14 @@ import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.settings.HudSettings
 
 internal class SkyBandSettings(private val settings: HudSettings) {
+    var geospatialConsent by mutableStateOf(settings.geospatialConsent)
+        private set
+
+    fun answerGeospatialConsent(answer: Boolean?) {
+        settings.geospatialConsent = answer
+        geospatialConsent = answer
+    }
+
     var enabled by mutableStateOf(settings.skyBand)
         private set
     var northOverride by mutableStateOf<NorthEstimate?>(null)
@@ -28,6 +36,7 @@ internal class SkyBandSettings(private val settings: HudSettings) {
         private set
 
     fun applyDebugIntent(intent: Intent) {
+        if (intent.getBooleanExtra("clear_geospatial_consent", false)) answerGeospatialConsent(null)
         if (intent.hasExtra("spatial_marks")) {
             spatialMarksEnabled = intent.getBooleanExtra("spatial_marks", spatialMarksEnabled)
             settings.spatialMarks = spatialMarksEnabled
