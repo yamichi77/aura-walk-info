@@ -21,6 +21,7 @@ internal data class NavHudVisual(
     val secondaryColor: Color,
     val route: NavMapRoute? = null,
     val primaryForLog: String = primary,
+    val arrow: NavArrowInput? = null,
 )
 
 internal data class NavMapRoute(
@@ -33,7 +34,7 @@ internal data class NavMapRoute(
 internal val NavState.isNavigationActive: Boolean
     get() = this is NavState.Guiding || this is NavState.Rerouting || this is NavState.Arrived
 
-internal fun navHudVisualFor(state: NavState, noFix: Boolean): NavHudVisual? {
+internal fun navHudVisualFor(state: NavState, noFix: Boolean, gpsCourseDeg: Float? = null): NavHudVisual? {
     val primaryColor = if (noFix) HudDimmed else HudText
     val guiding = when (state) {
         is NavState.Guiding -> state
@@ -66,6 +67,7 @@ internal fun navHudVisualFor(state: NavState, noFix: Boolean): NavHudVisual? {
         ),
         // Free-form instructions can contain place names. Never log them.
         primaryForLog = if (turn == null || navManeuver(turn) != null) primary else "［案内文省略］",
+        arrow = navArrowTravelBearing(guidance)?.let { NavArrowInput(it, gpsCourseDeg, noFix) },
     )
 }
 

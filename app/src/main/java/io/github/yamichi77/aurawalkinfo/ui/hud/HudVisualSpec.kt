@@ -107,7 +107,7 @@ internal fun hudVisualSpecFor(
         countdown = countdown,
         startingFromSummary = startingFromSummary,
         pics = pics?.takeIf { stopped && !noticePending }?.toHudDisplay(),
-        navigation = navHudVisualFor(navState, noFix),
+        navigation = navHudVisualFor(navState, noFix, state.gpsCourseDeg),
         destinationPrompt = destinationPrompt,
     )
 }

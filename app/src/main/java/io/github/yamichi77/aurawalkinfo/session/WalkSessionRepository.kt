@@ -226,6 +226,10 @@ class WalkSessionRepository internal constructor(
                     mapCenter = fix?.let { MapCenter(it.latitude, it.longitude) },
                     mapBearingDeg = bearing,
                     lastFixAccuracyMeters = fix?.accuracyMeters,
+                    gpsCourseDeg = fix?.takeIf {
+                        MotionThresholds.hasFix(it, now) &&
+                            it.speedMps?.let { speed -> speed.isFinite() && speed >= MotionThresholds.WALKING_MPS } == true
+                    }?.bearingDeg?.takeIf { it.isFinite() },
                 )
             }
             val elapsedSeconds = elapsed?.div(1_000)

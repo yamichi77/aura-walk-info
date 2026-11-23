@@ -52,6 +52,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPanel
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPlacementCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
+import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
 import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
@@ -75,6 +76,7 @@ internal fun HudScene(
     wallClock: WallClock,
     bigMapMode: BigMapMode,
     onTap: (HudTarget) -> Unit,
+    headingTracking: HeadingTracking? = null,
 ) {
     val session = LocalSession.current
     if (session == null) {
@@ -178,6 +180,7 @@ internal fun HudScene(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
                         showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
                         !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock, bigMapMode,
+                        headingTracking,
                     )
                 }
             }
@@ -205,6 +208,7 @@ private fun SpatialHudPanels(
     quantum: HudQuantum,
     wallClock: WallClock,
     bigMapMode: BigMapMode,
+    headingTracking: HeadingTracking?,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -256,7 +260,7 @@ private fun SpatialHudPanels(
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
             spec.navigation?.let { visual ->
-                SpatialNavGuidance(visual, size, dpPerMeter, scale, spec.opacity, motionOpacity)
+                SpatialNavGuidance(visual, size, dpPerMeter, scale, spec.opacity, motionOpacity, headingTracking)
             }
             if (!showBigMap) PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
                 QuantumMap(

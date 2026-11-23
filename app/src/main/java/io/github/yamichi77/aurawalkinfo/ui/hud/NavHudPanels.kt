@@ -7,14 +7,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -35,6 +39,8 @@ import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.width
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
+import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
+import io.github.yamichi77.aurawalkinfo.heading.hudHeadBearing
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
@@ -85,18 +91,46 @@ internal fun SpatialNavGuidance(
     scale: Float,
     opacity: Float,
     motionOpacity: Float,
+    headingTracking: HeadingTracking?,
 ) {
     val physicalDpPerMeter = dpPerMeter / scale
+    val withArrow = visual.arrow != null
+    val headBearing: (Long) -> Double? = remember(headingTracking) {
+        { now -> headingTracking?.hudHeadBearing(now) }
+    }
     SpatialPanel(
-        HudPlacement.modifier(HudPlacement.navPose(mapSize), dpPerMeter, scale)
-            .width((HudPlacement.navWidthMeters * physicalDpPerMeter).dp)
+        HudPlacement.modifier(HudPlacement.navPose(mapSize, withArrow), dpPerMeter, scale)
+            .width((HudPlacement.navWidthMeters(withArrow) * physicalDpPerMeter).dp)
             .height((HudPlacement.navHeightMeters * physicalDpPerMeter).dp)
             .alpha(motionOpacity),
         shape = SpatialRoundedCornerShape(CornerSize(0.dp)),
     ) {
         Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
-            NavGuidancePanel(visual, opacity, textScale = Layout.textScale(physicalDpPerMeter))
+            NavGuidanceContent(visual, opacity, physicalDpPerMeter, headBearing)
         }
+    }
+}
+
+@Composable
+internal fun NavGuidanceContent(
+    visual: NavHudVisual,
+    opacity: Float,
+    dpPerMeter: Float,
+    headBearing: (Long) -> Double?,
+) {
+    val textScale = Layout.textScale(dpPerMeter)
+    val arrow = visual.arrow
+    if (arrow == null) {
+        NavGuidancePanel(visual, opacity, textScale = textScale)
+        return
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        val arrowSize = (HudPlacement.navArrowSizeMeters * dpPerMeter).dp
+        Box(Modifier.size(arrowSize)) {
+            NavArrowCanvas(arrow, headBearing, opacity, Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.width((HudPlacement.navArrowGapMeters * dpPerMeter).dp))
+        NavGuidancePanel(visual, opacity, Modifier.weight(1f), textScale)
     }
 }
 
