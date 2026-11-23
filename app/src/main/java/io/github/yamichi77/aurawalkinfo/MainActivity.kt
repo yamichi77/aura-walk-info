@@ -16,6 +16,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
+import io.github.yamichi77.aurawalkinfo.ui.hud.LocalPicsReferenceNotice
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import kotlinx.coroutines.Job
@@ -176,14 +178,16 @@ class MainActivity : ComponentActivity() {
                     DiagnosticsScreen(this, mode, debug.capture)
                 } else {
                     val state by repository.state.collectAsStateWithLifecycle()
+                    val pics by container.picsReceiver.candidate.collectAsStateWithLifecycle()
+                    val denied = !locationGranted && debug.fakeState == null
                     val spec = hudVisualSpecFor(
                         debug.fakeState ?: state, noticePending = visibility.noticePending,
                         phase = controls.phase, countdown = controls.seconds,
                         startingFromSummary = controls.startingFromSummary,
+                        pics = pics.takeUnless { denied },
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
                     val bigMapMode = if (bigMap3d) BigMapMode.TILTED else BigMapMode.FLAT
-                    val denied = !locationGranted && debug.fakeState == null
                     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled && !debug.preview2d
                     ObserveHeadPoses(
                         container.headPoses, container.headingTracking,
@@ -199,19 +203,21 @@ class MainActivity : ComponentActivity() {
                             Log.i("AuraHud", "route=$route")
                         }
                     }
-                    if (spatial) {
-                        if (headTrackingGranted) {
-                            HudScene(
+                    CompositionLocalProvider(LocalPicsReferenceNotice provides container.picsReferenceNotice) {
+                        if (spatial) {
+                            if (headTrackingGranted) {
+                                HudScene(
+                                    spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
+                                    controls.quantumStartup, container.wallClock, bigMapMode, onTap,
+                                )
+                            }
+                        } else {
+                            PhoneScreen(
                                 spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                                controls.quantumStartup, container.wallClock, bigMapMode, onTap,
+                                quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
+                                bigMapMode = bigMapMode, onTap = onTap,
                             )
                         }
-                    } else {
-                        PhoneScreen(
-                            spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                            quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
-                            bigMapMode = bigMapMode, onTap = onTap,
-                        )
                     }
                 }
             }

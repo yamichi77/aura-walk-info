@@ -44,6 +44,7 @@ import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapEffect
 import com.google.maps.android.compose.MapProperties
@@ -126,7 +127,7 @@ internal fun MiniMapPanel(
     }
 
     BoxWithConstraints(modifier) {
-        if (center != null && hasKey) {
+        val camera = if (center != null && hasKey) {
             val position = bigMapMode?.cameraPosition(center) ?: northUpCameraPosition(center, MAP_ZOOM)
             if (selfCheck) {
                 LaunchedEffect(position) {
@@ -135,14 +136,18 @@ internal fun MiniMapPanel(
             }
             // Maps projects the GPS target to the center of the padded area, including at a tilt.
             val padding = centeredMapPadding(minOf(maxWidth, maxHeight))
+            val camera = rememberCameraPositionState { this.position = position }
             MiniMapSurface(
                 position, padding, selfCheck, checkSnapshot = selfCheck && debug.fakeState != null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
                 mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
                 buildingsEnabled = bigMapMode?.buildingsEnabled == true,
+                camera = camera,
             )
-        }
+            camera
+        } else null
         MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
+        if (camera != null) PicsIntersectionLayer(spec, camera, bigMapMode, mapOpacity)
     }
 }
 
@@ -202,6 +207,7 @@ internal fun MiniMapSurface(
     @RawRes mapStyle: Int,
     buildingsEnabled: Boolean,
     probeCase: String? = null,
+    camera: CameraPositionState = rememberCameraPositionState { this.position = position },
 ) {
     val context = LocalContext.current
     val properties = remember(context, mapStyle, buildingsEnabled) {
@@ -212,7 +218,6 @@ internal fun MiniMapSurface(
             mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, mapStyle),
         )
     }
-    val camera = rememberCameraPositionState { this.position = position }
     val target by rememberUpdatedState(position)
     val startedAt = remember { SystemClock.elapsedRealtime() }
     val loaded = remember { CompletableDeferred<Long>() }
