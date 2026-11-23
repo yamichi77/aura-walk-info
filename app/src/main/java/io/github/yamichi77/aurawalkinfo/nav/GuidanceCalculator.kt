@@ -26,7 +26,7 @@ internal fun NavPoint.distanceTo(other: NavPoint): Double {
     return 2 * EARTH_RADIUS_METERS * asin(sqrt(haversine.coerceIn(0.0, 1.0)))
 }
 
-private fun NavPoint.bearingTo(other: NavPoint): Double? {
+internal fun NavPoint.bearingTo(other: NavPoint): Double? {
     val longitudeDelta = wrapLongitude(other.longitude - longitude)
     if (latitude == other.latitude && longitudeDelta == 0.0) return null
     val from = Math.toRadians(latitude)

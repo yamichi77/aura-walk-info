@@ -230,6 +230,7 @@ class MainActivity : ComponentActivity() {
                                 HudScene(
                                     spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
                                     controls.quantumStartup, container.wallClock, bigMapMode, onTap,
+                                    headingTracking = container.headingTracking,
                                 )
                             }
                         } else {

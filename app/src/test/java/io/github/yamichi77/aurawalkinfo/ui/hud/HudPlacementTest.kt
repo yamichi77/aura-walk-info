@@ -74,4 +74,22 @@ class HudPlacementTest {
     }
 
     private fun yaw(point: Vector3) = Math.toDegrees(atan2(point.x, -point.z).toDouble())
+
+    @Test
+    fun navigationWithArrowStaysWithinPeripheryThroughoutResize() {
+        val width = HudPlacement.navWidthMeters(withArrow = true)
+        for (tenth in 80..120) {
+            val size = HudPlacement.mapSizeMeters(tenth / 10f)
+            val panel = HudPlacement.navPose(size, withArrow = true)
+            val map = HudPlacement.pose(Layout.rightYaw, Layout.pitch)
+            for (y in listOf(-HudPlacement.navHeightMeters / 2, HudPlacement.navHeightMeters / 2)) {
+                val inner = panel.transformPoint(Vector3(-width / 2, y, 0f))
+                val outer = panel.transformPoint(Vector3(width / 2, y, 0f))
+                assertTrue("diameter=$tenth inner=${yaw(inner)}", yaw(inner) > 16.0)
+                assertTrue("diameter=$tenth outer=${yaw(outer)}", yaw(outer) < 30.0)
+            }
+            assertTrue(panel.transformPoint(Vector3(0f, -HudPlacement.navHeightMeters / 2, 0f)).y >
+                map.transformPoint(Vector3(0f, size / 2, 0f)).y)
+        }
+    }
 }

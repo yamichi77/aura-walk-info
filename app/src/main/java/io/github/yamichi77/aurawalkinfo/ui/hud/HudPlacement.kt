@@ -58,11 +58,34 @@ internal object HudPlacement {
     val bigMapArrowHeightMeters get() = mapArrowHeight(mapSizeMeters(Layout.walkingDiameter))
     val navWidthMeters = 2 * planeHalfSpan(5.7f)
     val navHeightMeters = 2 * planeHalfSpan(2.4f)
+    val navArrowSizeMeters = 2 * planeHalfSpan(NavArrowStyle.widthDegrees / 2)
+    val navArrowGapMeters = planeHalfSpan(NavArrowStyle.gapDegrees)
+    // Leave both the inner clearance and the outer edge of the field of view clear.
+    private val navTextWithArrowWidthMeters = 2 * planeHalfSpan(5.05f)
 
     fun navPose(mapSizeMeters: Float): Pose {
         val anchor = pose(Layout.rightYaw, Layout.pitch)
         val offset = mapSizeMeters / 2 + planeHalfSpan(0.35f) + navHeightMeters / 2
         return Pose(anchor.translation + anchor.up * offset, anchor.rotation)
+    }
+
+    fun navWidthMeters(withArrow: Boolean): Float =
+        if (withArrow) navTextWithArrowWidthMeters + navArrowSizeMeters + navArrowGapMeters else navWidthMeters
+
+    fun navPose(mapSizeMeters: Float, withArrow: Boolean): Pose {
+        val textPose = navPose(mapSizeMeters)
+        if (!withArrow) return textPose
+        val width = navWidthMeters(withArrow = true)
+        val preferredCenter = -(navArrowSizeMeters + navArrowGapMeters) / 2
+        val innerX = preferredCenter - width / 2
+        val limit = tangent(Layout.clearZoneDegrees + Layout.clearGapDegrees + roundingMarginDegrees)
+        val right = textPose.right
+        // At the clearance angle, x + z * tan(yaw) is zero. Slide along the panel to clear both corners.
+        val outwardShift = maxOf(0f, listOf(-navHeightMeters / 2, navHeightMeters / 2).maxOf { y ->
+            val edge = textPose.transformPoint(Vector3(innerX, y, 0f))
+            -(edge.x + edge.z * limit) / (right.x + right.z * limit)
+        })
+        return Pose(textPose.translation + right * (preferredCenter + outwardShift), textPose.rotation)
     }
 
     // Allow for layout's integer pixel rounding at the inside edges.
