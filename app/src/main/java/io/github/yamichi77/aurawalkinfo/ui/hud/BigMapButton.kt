@@ -160,13 +160,20 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
         fun line(x: Float, y: Float) = point(x, y).let { lineTo(it.x, it.y) }
         when (label) {
             "目的地" -> {
-                move(0f, 1f)
-                val left = point(-1.55f, -0.72f)
-                val top = point(0f, -1.5f)
-                val right = point(1.55f, -0.72f)
-                cubicTo(left.x, left.y, left.x, top.y, top.x, top.y)
-                cubicTo(right.x, top.y, right.x, right.y, center.x, point(0f, 1f).y)
+                // A map pin: a round head whose tangents meet at the tip, with a hole in the head.
+                val headY = -0.35f
+                val headRadius = 0.8f
+                val tipY = 1.25f
+                val tangent = kotlin.math.acos(headRadius / (tipY - headY))
+                val tangentDegrees = Math.toDegrees(tangent.toDouble()).toFloat()
+                move(0f, tipY)
+                line(headRadius * kotlin.math.sin(tangent), headY + headRadius * kotlin.math.cos(tangent))
+                arcTo(
+                    Rect(point(-headRadius, headY - headRadius), point(headRadius, headY + headRadius)),
+                    90f - tangentDegrees, 2 * tangentDegrees - 360f, false,
+                )
                 close()
+                addOval(Rect(point(-0.3f, headY - 0.3f), point(0.3f, headY + 0.3f)))
             }
             "3D" -> {
                 move(0f, -1f)

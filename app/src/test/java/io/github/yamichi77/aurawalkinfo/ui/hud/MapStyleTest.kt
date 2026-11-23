@@ -36,13 +36,13 @@ class MapStyleTest {
             assertEquals("on", tilted.style("transit.station.rail", element, "visibility"))
         }
         // The legacy style cannot separate buildings from built-up ground, so a fill lights the whole
-        // ground on the additive display. Keep the fill black and draw only dim outlines (T20 on AURA).
+        // ground on the additive display. Keep the fill black and draw only outlines (T20 on AURA).
         assertEquals("#000000", tilted.style("landscape.man_made", "geometry.fill", "color"))
         val stroke = tilted.style("landscape.man_made", "geometry.stroke", "color")
-        assertEquals("#5C7480", stroke)
-        val road = flat.style("road.arterial", "geometry", "color")
-        assertEquals("#808080", road)
-        assertTrue(luminance(requireNotNull(stroke)) < luminance(requireNotNull(road)))
+        assertEquals("#7A98A8", stroke)
+        // Thin outlines read darker than filled road ribbons, so they may be a little brighter than
+        // the thick roads, but stay well below the HUD text color #E0F7FF.
+        assertTrue(luminance(requireNotNull(stroke)) < luminance("#E0F7FF") * 0.7)
     }
 
     private fun luminance(hex: String): Double {
