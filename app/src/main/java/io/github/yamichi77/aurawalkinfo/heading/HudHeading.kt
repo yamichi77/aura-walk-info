@@ -1,8 +1,11 @@
 package io.github.yamichi77.aurawalkinfo.heading
 
+internal inline fun preferredNorth(vps: NorthEstimate?, gps: () -> NorthEstimate?): NorthEstimate? =
+    vps ?: gps()
+
 /** Reads T15 on the same dispatcher and monotonic clock as the pose observer. */
 internal fun HeadingTracking.hudHeadBearing(nowMillis: Long): Double? =
-    hudHeadBearing(poseAt(nowMillis), estimate(nowMillis))
+    hudHeadBearing(poseAt(nowMillis), displayNorth(nowMillis))
 
 internal fun hudHeadBearing(pose: HeadPose?, north: NorthEstimate?): Double? {
     val yaw = pose?.takeIf { it.tracking == HeadTracking.TRACKING }?.yawDegrees

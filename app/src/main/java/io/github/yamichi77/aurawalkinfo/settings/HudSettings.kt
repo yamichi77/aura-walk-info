@@ -5,6 +5,14 @@ import android.content.Context
 internal class HudSettings(context: Context) {
     private val preferences = context.getSharedPreferences("hud_settings", Context.MODE_PRIVATE)
 
+    var geospatialConsent: Boolean?
+        get() = preferences.takeIf { it.contains("geospatial_consent") }?.getBoolean("geospatial_consent", false)
+        set(value) {
+            val editor = preferences.edit()
+            if (value == null) editor.remove("geospatial_consent") else editor.putBoolean("geospatial_consent", value)
+            editor.apply()
+        }
+
     var skyBand: Boolean
         get() = preferences.getBoolean("sky_band", true)
         set(value) {

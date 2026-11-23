@@ -6,7 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
-all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband,spatial
+all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband,spatial,geospatial
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -579,7 +579,7 @@ wait_for_safety_log() {
     [[ $pid =~ ^[0-9]+$ ]] || return 1
     run_log=
     while (( SECONDS < deadline )); do
-        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav AuraSky AuraPlacement AuraSpatial) || return 1
+        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav AuraSky AuraPlacement AuraSpatial AuraGeo) || return 1
         entries=$run_log
         if [[ -n $after ]]; then
             entries=$(awk -v after="$after" 'seen; $0 ~ after { seen = 1 }' <<< "$run_log")
@@ -606,6 +606,23 @@ check_nav() {
     printf '%s\n' "$run_log" >> "$log"
     adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es action cancel >> "$log" || true
     replay_scenario stop || true
+}
+
+check_geospatial() {
+    start_run geospatial -W --es startMode auto || return 0
+    echo 'geospatial: VPS の対応地点で、初回は「使う」を選び、徒歩案内を開始してください（最大120秒）。'
+    if wait_for_safety_log 'AuraGeo[[:space:]]*: source=VPS reason=READY state=RUNNING' 120; then
+        record PASS 'geospatial VPS 追跡・精度'
+        echo 'geospatial: 印と方位を確認したら案内を終了してください（最大45秒）。'
+        if wait_for_safety_log 'AuraGeo[[:space:]]*: source=GPS reason=TRACKER_STOPPED disabled=true' 45 +            'AuraGeo.*source=VPS reason=READY'; then
+            record PASS 'geospatial VPS 停止と GPS 復帰'
+        else
+            record FAIL 'geospatial VPS 停止を確認できません'
+        fi
+    else
+        record FAIL 'geospatial VPS の精度条件を確認できません'
+    fi
+    grep 'AuraGeo' <<< "$run_log" >> "$log" || true
 }
 
 sky_settings() {
@@ -983,7 +1000,8 @@ main() {
         if selected bigmap; then record SKIP 'bigmap（装着が必要）'; fi
         if selected skyband; then record SKIP 'skyband（装着が必要）'; fi
         if selected spatial; then record SKIP 'spatial（装着が必要）'; fi
-        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband|spatial)(,(placement|headmotion|input|bigmap|skyband|spatial))*$ ]]; then
+        if selected geospatial; then record SKIP 'geospatial（屋外での装着が必要）'; fi
+        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband|spatial|geospatial)(,(placement|headmotion|input|bigmap|skyband|spatial|geospatial))*$ ]]; then
             printf '%s\n' "${results[@]}"
             return 0
         fi
@@ -1015,6 +1033,7 @@ main() {
     if selected nav; then check_nav; fi
     if ! $preview && selected skyband; then check_skyband; fi
     if ! $preview && selected spatial; then check_spatial; fi
+    if ! $preview && selected geospatial; then check_geospatial; fi
     summary
     return "$failed"
 }

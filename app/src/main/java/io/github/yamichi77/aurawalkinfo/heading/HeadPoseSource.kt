@@ -13,6 +13,7 @@ import androidx.xr.runtime.Config
 import androidx.xr.runtime.DeviceTrackingMode
 import androidx.xr.runtime.Session
 import androidx.xr.runtime.SessionConfigureSuccess
+import io.github.yamichi77.aurawalkinfo.geospatial.VpsTracking
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlinx.coroutines.CancellationException
@@ -82,6 +83,7 @@ internal class HeadPoseSource {
 }
 
 internal class HeadingTracking {
+    val geospatial = VpsTracking()
     private val estimator = HeadingEstimator()
     private val latestPose = MutableStateFlow<HeadPose?>(null)
     private var fixPose: HeadPose? = null
@@ -114,6 +116,9 @@ internal class HeadingTracking {
         nowMillis - timeMillis in 0..HeadingEstimator.MAX_POSE_GAP_MS
 
     fun estimate(nowMillis: Long): NorthEstimate? = estimator.estimate(nowMillis)
+
+    fun displayNorth(nowMillis: Long): NorthEstimate? =
+        preferredNorth(geospatial.fix(nowMillis)?.north) { estimate(nowMillis) }
 
     fun clear() {
         latestPose.value = null
