@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -68,7 +69,7 @@ class NavigationHudTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun speechShowsThreeCandidatesThenSelectedRouteShowsBothGuidanceLines() {
+    fun speechShowsThreeCandidatesThenPreviewRequiresStartBeforeGuidance() {
         val f = Fixture()
         render(f)
         tap("map")
@@ -88,7 +89,23 @@ class NavigationHudTest {
         tap("nav_candidate_2")
         text("経路を取得中…").assertIsDisplayed()
         compose.runOnIdle { f.finishRoute() }
+        text("約 2分・91m").assertIsDisplayed()
+        text("開始").assertIsDisplayed()
+        text("やめる").assertIsDisplayed()
+        text("ナビ終了").assertDoesNotExist()
+        val mapBounds = compose.onNodeWithTag("bigmap").getUnclippedBoundsInRoot()
+        for (target in listOf("nav_start", "nav_cancel")) {
+            assertTrue(compose.onNodeWithTag(target).getUnclippedBoundsInRoot().left > mapBounds.right)
+        }
+        for (button in HudPlacement.bigMapButtons) {
+            compose.onNodeWithTag(button.target.name.lowercase()).assertDoesNotExist()
+        }
+        assertTrue(f.nav.state.value is NavState.Preview)
+        tap("nav_start")
         text("ナビ終了").assertIsDisplayed()
+        text("約 2分・91m").assertDoesNotExist()
+        compose.onNodeWithTag("nav_start").assertDoesNotExist()
+        compose.onNodeWithTag("bigmap_mode").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals("合成の検索語", f.query)
             assertEquals("合成候補2", (f.nav.state.value as NavState.Guiding).destination.name)
@@ -175,7 +192,7 @@ class NavigationHudTest {
     }
 
     @Test
-    fun timeoutDuringRoutingClosesOnlyTheMapAndLateRouteStartsGuidance() {
+    fun timeoutDuringRoutingDiscardsLateRoute() {
         val f = Fixture(MotionState.STOPPED)
         render(f)
         tap("map")
@@ -196,9 +213,40 @@ class NavigationHudTest {
             f.fixes.tryEmit(syntheticFix(f.clock.elapsedRealtimeMillis()))
             f.finishRoute()
         }
-        text("40m先 右").assertIsDisplayed()
-        text("残り 91m・2分").assertIsDisplayed()
-        text("ナビ終了").assertDoesNotExist()
+        text("40m先 右").assertDoesNotExist()
+        text("開始").assertDoesNotExist()
+        assertEquals(NavState.Idle, f.nav.state.value)
+    }
+
+    @Test
+    fun stoppedPreviewStaysOpenAndWalkingClosesItAfterTenSecondsWithoutGuidance() {
+        val f = Fixture(MotionState.STOPPED)
+        render(f)
+        openPreview(f)
+        advance(f, 31_000)
+        text("開始").assertIsDisplayed()
+        compose.runOnIdle {
+            f.motion = MotionState.WALKING
+            f.refreshMap()
+        }
+        advance(f, 9_999)
+        text("開始").assertIsDisplayed()
+        advance(f, 1)
+        assertPreviewDismissed(f)
+        compose.onNodeWithTag("bigmap").assertDoesNotExist()
+    }
+
+    @Test
+    fun fastMotionClosesPreviewWithoutGuidance() {
+        val f = Fixture(MotionState.STOPPED)
+        render(f)
+        openPreview(f)
+        compose.runOnIdle {
+            f.motion = MotionState.FAST
+            f.refreshMap()
+        }
+        assertPreviewDismissed(f)
+        compose.onNodeWithTag("bigmap").assertDoesNotExist()
     }
 
     @Test
@@ -232,7 +280,11 @@ class NavigationHudTest {
         assertEquals(f.selectedPoint, f.requestedDestination)
         assertEquals(null, f.map.closesAt)
         compose.runOnIdle { f.finishRoute() }
-        assertEquals("みほん市試験町1丁目", (f.nav.state.value as NavState.Guiding).destination.name)
+        assertEquals("みほん市試験町1丁目", (f.nav.state.value as NavState.Preview).destination.name)
+        tap("nav_cancel")
+        assertPreviewDismissed(f)
+        text("目的地").assertIsDisplayed()
+        assertTrue(f.map.isOpen)
     }
 
     @Test
@@ -334,6 +386,21 @@ class NavigationHudTest {
     private fun speak(f: Fixture) {
         tap("nav_destination")
         compose.runOnIdle { f.recognized.complete(SpeechResult.Recognized("合成")) }
+    }
+
+    private fun openPreview(f: Fixture) {
+        tap("map")
+        speak(f)
+        compose.runOnIdle { f.finishSearch() }
+        tap("nav_candidate_1")
+        compose.runOnIdle { f.finishRoute() }
+        text("開始").assertIsDisplayed()
+    }
+
+    private fun assertPreviewDismissed(f: Fixture) {
+        text("開始").assertDoesNotExist()
+        text("40m先 右").assertDoesNotExist()
+        assertEquals(NavState.Idle, f.nav.state.value)
     }
 
     private fun checkMessage(f: Fixture, message: String) {

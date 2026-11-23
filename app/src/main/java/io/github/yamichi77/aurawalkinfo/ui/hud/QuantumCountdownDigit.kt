@@ -148,18 +148,19 @@ internal fun CountdownRipple(progress: Float, modifier: Modifier) {
     }
 }
 
-internal fun DrawScope.drawQuantumElectron(radius: Float, angle: Float) {
+internal fun DrawScope.drawQuantumElectron(radius: Float, angle: Float, alpha: Float = 1f) {
     drawCircle(
         HudDetail, radius = 2.dp.toPx(),
         center = center + Offset(cos(angle) * radius, sin(angle) * radius),
+        alpha = alpha,
     )
 }
 
-internal fun DrawScope.drawQuantumRipple(progress: Float, startRadius: Float, endRadius: Float) {
+internal fun DrawScope.drawQuantumRipple(progress: Float, startRadius: Float, endRadius: Float, alpha: Float = 1f) {
     drawCircle(
         QuantumCyan,
         radius = startRadius + (endRadius - startRadius) * progress,
-        alpha = 0.8f * (1f - progress),
+        alpha = 0.8f * (1f - progress) * alpha,
         style = Stroke(1.dp.toPx()),
     )
 }

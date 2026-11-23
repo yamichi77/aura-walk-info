@@ -320,7 +320,7 @@ private fun SpatialHudPanels(
                 }
             }
             val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
-            for (button in HudPlacement.bigMapButtons) {
+            for (button in rememberBigMapButtons(spec.destinationPrompt, showBigMap)) {
                 SpatialBigMapButton(
                     button, button.buttonLabel(destinationLabel, bigMapMode), button.target,
                     spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,

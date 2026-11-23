@@ -5,7 +5,7 @@ import io.github.yamichi77.aurawalkinfo.safety.MotionState
 internal enum class HudTarget {
     LEFT, MAP, BIGMAP, OUTSIDE, COUNTDOWN, BIGMAP_MODE, BIGMAP_ZOOM_IN, BIGMAP_ZOOM_OUT,
     BIGMAP_RECENTER,
-    NAV_DESTINATION, NAV_CANDIDATE_1, NAV_CANDIDATE_2, NAV_CANDIDATE_3, NAV_CANCEL,
+    NAV_DESTINATION, NAV_CANDIDATE_1, NAV_CANDIDATE_2, NAV_CANDIDATE_3, NAV_START, NAV_CANCEL,
 }
 
 internal data class BigMapControl(
@@ -38,7 +38,8 @@ internal data class BigMapControl(
             HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP -> current
             HudTarget.BIGMAP_MODE, HudTarget.BIGMAP_ZOOM_IN, HudTarget.BIGMAP_ZOOM_OUT, HudTarget.BIGMAP_RECENTER,
             HudTarget.NAV_DESTINATION, HudTarget.NAV_CANDIDATE_1, HudTarget.NAV_CANDIDATE_2,
-            HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_CANCEL -> current.interact(now, motion, destinationInput)
+            HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_START, HudTarget.NAV_CANCEL ->
+                current.interact(now, motion, destinationInput)
         }
     }
 

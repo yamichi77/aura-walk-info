@@ -49,12 +49,29 @@ class NavRepository internal constructor(
 
     fun selectCandidate(candidate: NavCandidate) = scope.launch {
         if (candidate in (state.value as? NavState.Candidates)?.items.orEmpty()) {
-            startRoute(NavDestination(candidate.point, candidate.name))
+            startRoute(NavDestination(candidate.point, candidate.name), preview = true)
         }
     }
 
     fun navigateTo(point: NavPoint, name: String? = null) = scope.launch {
-        startRoute(NavDestination(point, name))
+        startRoute(NavDestination(point, name), preview = false)
+    }
+
+    fun previewTo(point: NavPoint, name: String? = null) = scope.launch {
+        startRoute(NavDestination(point, name), preview = true)
+    }
+
+    fun startGuidance() = command {
+        val preview = state.value as? NavState.Preview ?: return@command
+        replaceOperation(start = CoroutineStart.UNDISPATCHED) {
+            publish(NavState.Routing(preview.destination))
+            withLocations(locations) { fixes ->
+                val origin = preview.origin.takeIf { it.isUsable(clock.elapsedRealtimeMillis()) }
+                    ?: awaitOrigin(fixes)
+                guide(fixes, preview.destination, preview.route, origin, synthetic = false)
+            }
+            finishArrival()
+        }
     }
 
     fun cancel() = command {
@@ -77,9 +94,9 @@ class NavRepository internal constructor(
         scope.launch { action() }
     }
 
-    private fun startRoute(destination: NavDestination) {
+    private fun startRoute(destination: NavDestination, preview: Boolean) {
         // Publish Routing before the command completes, even when the scope queues new jobs.
-        replaceOperation(start = CoroutineStart.UNDISPATCHED) { startLive(destination) }
+        replaceOperation(start = CoroutineStart.UNDISPATCHED) { startLive(destination, preview) }
     }
 
     private fun replaceOperation(start: CoroutineStart = CoroutineStart.DEFAULT, action: suspend () -> Unit) {
@@ -93,17 +110,23 @@ class NavRepository internal constructor(
         }
     }
 
-    private suspend fun startLive(destination: NavDestination) {
+    private suspend fun startLive(destination: NavDestination, preview: Boolean) {
         publish(NavState.Routing(destination))
         withLocations(locations) { fixes ->
             val origin = awaitOrigin(fixes)
             if (origin.hasArrived(destination)) {
-                publish(NavState.Arrived(destination))
+                if (preview) {
+                    val route = NavRoute(0, java.time.Duration.ZERO, listOf(origin.navPoint(), destination.point), emptyList())
+                    publish(NavState.Preview(destination, route, origin))
+                } else {
+                    publish(NavState.Arrived(destination))
+                }
                 return@withLocations
             }
             val route = service.route(origin.navPoint(), destination.point)
             currentCoroutineContext().ensureActive()
-            guide(fixes, destination, route, origin, synthetic = false)
+            if (preview) publish(NavState.Preview(destination, route, origin))
+            else guide(fixes, destination, route, origin, synthetic = false)
         }
         finishArrival()
     }

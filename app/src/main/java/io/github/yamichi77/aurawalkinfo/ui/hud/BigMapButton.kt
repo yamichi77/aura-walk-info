@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -36,6 +37,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 import kotlinx.coroutines.flow.first
+
+@Composable
+internal fun rememberBigMapButtons(prompt: DestinationPrompt, open: Boolean): List<HudPlacement.BigMapButtonPlacement> {
+    val preview = prompt is DestinationPrompt.Preview
+    var outgoingPreview by remember { mutableStateOf(preview) }
+    if (open) SideEffect { outgoingPreview = preview }
+    return if (if (open) preview else outgoingPreview) HudPlacement.routePreviewButtons else HudPlacement.bigMapButtons
+}
 
 @Composable
 internal fun rememberBigMapDestinationLabel(spec: HudVisualSpec.Clusters, open: Boolean): String? {
@@ -115,38 +124,43 @@ internal fun BigMapButton(
     Column(
         modifier.graphicsLayer {
             val fade = if (quantum?.effect == QuantumEffect.CloseMap) 1f - quantum.contentAlpha else 1f
-            alpha = motionAlpha * fade
+            alpha = fade
         }.then(click),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         val particles = if (opening != null) remember { quantumRingParticles(24) } else emptyList()
         val effectTag = when {
-            opening != null -> "gather"
+            opening?.gathering == true -> "gather"
             rippling -> "ripple"
             orbiting -> "orbit"
             else -> null
         }
         val name = target.name.lowercase()
-        Canvas(Modifier.size(diameter).testTag(
-            if (effectTag == null) "$name-artwork" else "quantum-$name-$effectTag",
-        )) {
-            val radius = (size.minDimension - 1f) / 2
-            val contentAlpha = opening?.contentAlpha ?: 1f
-            if (label != null) {
-                drawCircle(QuantumCyan, radius, alpha = 0.7f * contentAlpha, style = Stroke(1f))
-                drawButtonIcon(label, radius, contentAlpha)
-                if (orbiting) drawQuantumElectron(radius, quantumOrbitAngle(motion.orbit))
-                if (opening != null) drawQuantumParticles(particles, opening, center, radius, outgoing = false)
+        Box(Modifier.size(diameter)) {
+            Canvas(Modifier.matchParentSize().testTag(
+                if (effectTag == null) "$name-artwork" else "quantum-$name-$effectTag",
+            )) {
+                val radius = (size.minDimension - 1f) / 2
+                val contentAlpha = (opening?.contentAlpha ?: 1f) * motionAlpha
+                if (label != null) {
+                    drawCircle(QuantumCyan, radius, alpha = 0.7f * contentAlpha, style = Stroke(1f))
+                    drawButtonIcon(label, radius, contentAlpha)
+                    if (opening != null) drawQuantumParticles(particles, opening, center, radius, outgoing = false)
+                    if (orbiting) drawQuantumElectron(radius, quantumOrbitAngle(motion.orbit), motionAlpha)
+                }
+                if (rippling) drawQuantumRipple(motion.ripple, radius, radius * 1.22f, motionAlpha)
             }
-            if (rippling) drawQuantumRipple(motion.ripple, radius, radius * 1.22f)
+            if (label != null && quantumEnabled) {
+                QuantumRimFlash(opening, Modifier.matchParentSize(), "quantum-$name-rim")
+            }
         }
         val textSize = with(LocalDensity.current) { 14.dp.toSp() }
         // Reserve the label row while a destination pinch changes the map into the input panel.
         Text(
             label.orEmpty(), color = HudText, fontSize = textSize, lineHeight = textSize,
             letterSpacing = 0.sp, textAlign = TextAlign.Center, maxLines = 2,
-            modifier = Modifier.graphicsLayer { alpha = opening?.contentAlpha ?: 1f },
+            modifier = Modifier.graphicsLayer { alpha = (opening?.contentAlpha ?: 1f) * motionAlpha },
         )
     }
 }
@@ -189,6 +203,12 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
                 line(0f, 1f)
             }
             "2D" -> addRect(Rect(point(-0.9f, -0.9f), point(0.9f, 0.9f)))
+            "開始" -> {
+                move(-0.65f, -1f)
+                line(1f, 0f)
+                line(-0.65f, 1f)
+                close()
+            }
             "＋", "－" -> {
                 move(-1f, 0f)
                 line(1f, 0f)

@@ -28,6 +28,7 @@ internal sealed interface DestinationPrompt {
     data object Searching : DestinationPrompt
     data class Candidates(val items: List<NavCandidate>) : DestinationPrompt
     data object Routing : DestinationPrompt
+    data class Preview(val route: NavState.Preview) : DestinationPrompt
     data class Message(val text: String) : DestinationPrompt
     data object ConfirmEnd : DestinationPrompt
 }
@@ -39,13 +40,14 @@ internal class DestinationInput(
     private val requestMicrophone: suspend () -> Boolean,
     private val clock: Clock,
     private val onInputChanged: () -> Unit = {},
+    private val onGuidanceStarted: () -> Unit = {},
     private val mapAcceptsInput: () -> Boolean,
 ) {
     var prompt by mutableStateOf<DestinationPrompt>(DestinationPrompt.Map)
         private set
     val enteringDestination: Boolean get() = when (prompt) {
         is DestinationPrompt.Listening, DestinationPrompt.Searching, is DestinationPrompt.Candidates,
-        DestinationPrompt.Routing, is DestinationPrompt.Message -> true
+        DestinationPrompt.Routing, is DestinationPrompt.Preview, is DestinationPrompt.Message -> true
         else -> false
     }
     private var work: Job? = null
@@ -74,7 +76,13 @@ internal class DestinationInput(
                     close()
                 }
             }
-            target == HudTarget.NAV_CANCEL && current is DestinationPrompt.Candidates -> close()
+            target == HudTarget.NAV_CANCEL && (current is DestinationPrompt.Candidates ||
+                current is DestinationPrompt.Preview) -> close()
+            target == HudTarget.NAV_START && current is DestinationPrompt.Preview -> {
+                nav.startGuidance()
+                onGuidanceStarted()
+                show(DestinationPrompt.Map)
+            }
             current is DestinationPrompt.Candidates -> {
                 val index = destinationCandidateTargets.indexOf(target)
                 current.items.getOrNull(index)?.let(::route)
@@ -82,9 +90,7 @@ internal class DestinationInput(
         }
     }
 
-    fun onMapClosed() {
-        if (prompt != DestinationPrompt.Routing) close()
-    }
+    fun onMapClosed() = close()
 
     fun selectMapPoint(point: NavPoint, geocoder: ReverseGeocoder) {
         if (!mapAcceptsInput() || prompt != DestinationPrompt.Map) return
@@ -93,7 +99,7 @@ internal class DestinationInput(
             val address = withTimeoutOrNull(3_000L) { geocoder.lookup(point.latitude, point.longitude) }
             val name = address?.let(JapaneseAddressFormatter::oneLine)?.takeIf(String::isNotBlank)
                 ?: "地図で選んだ場所"
-            nav.navigateTo(point, name).join()
+            nav.previewTo(point, name).join()
             awaitRoute()
         }
     }
@@ -102,7 +108,8 @@ internal class DestinationInput(
         work?.cancel()
         work = null
         when (prompt) {
-            DestinationPrompt.Searching, is DestinationPrompt.Candidates ->
+            DestinationPrompt.Searching, is DestinationPrompt.Candidates, DestinationPrompt.Routing,
+            is DestinationPrompt.Preview ->
                 if (!nav.state.value.isNavigationActive) nav.cancel()
             else -> Unit
         }
@@ -157,7 +164,12 @@ internal class DestinationInput(
     }
 
     private suspend fun awaitRoute() {
-        val result = nav.state.first { it.isNavigationActive || it is NavState.Error || it == NavState.Idle }
+        val result = nav.state.first { it is NavState.Preview || it is NavState.Error || it == NavState.Idle }
+        if (result is NavState.Preview && mapAcceptsInput()) {
+            show(DestinationPrompt.Preview(result))
+            return
+        }
+        if (result is NavState.Preview) nav.cancel()
         if (result is NavState.Error) {
             nav.cancel()
             if (mapAcceptsInput()) {
@@ -190,4 +202,5 @@ internal val destinationCandidateTargets = listOf(
 )
 
 internal val HudTarget.isDestinationInput: Boolean
-    get() = this == HudTarget.NAV_DESTINATION || this == HudTarget.NAV_CANCEL || this in destinationCandidateTargets
+    get() = this == HudTarget.NAV_DESTINATION || this == HudTarget.NAV_START ||
+        this == HudTarget.NAV_CANCEL || this in destinationCandidateTargets
