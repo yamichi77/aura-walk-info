@@ -92,13 +92,15 @@ class MainActivity : ComponentActivity() {
         microphoneRequest?.complete(granted)
         microphoneRequest = null
     }
-    private val destinationInput by lazy {
+    private val destinationInput: DestinationInput by lazy {
         DestinationInput(
             lifecycleScope, container.navRepository, AndroidDestinationSpeech(this), ::requestMicrophone,
-            Clock(SystemClock::elapsedRealtime),
+            Clock(SystemClock::elapsedRealtime), onInputChanged = ::refreshControls,
         ) {
             (locationGranted || fakeMotion != null) && !visibility.noticePending &&
-                controls.map.advance(SystemClock.elapsedRealtime(), currentMotion()).isOpen
+                controls.map.advance(
+                    SystemClock.elapsedRealtime(), currentMotion(), destinationInput.enteringDestination,
+                ).isOpen
         }
     }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -344,7 +346,7 @@ class MainActivity : ComponentActivity() {
             } else if (hit.isDestinationInput) {
                 destinationInput.tap(hit)
             } else {
-                setMap(controls.map.tap(hit, now, motion), now, "tap")
+                setMap(controls.map.tap(hit, now, motion, destinationInput.enteringDestination), now, "tap")
             }
         }
         scheduleControls(now)
@@ -359,7 +361,7 @@ class MainActivity : ComponentActivity() {
     private fun advanceControls(now: Long, motion: MotionState) {
         setPhase(controls.phase.advance(now))
         val reason = if (motion == MotionState.FAST) "fast" else "timeout"
-        setMap(controls.map.advance(now, motion), now, reason)
+        setMap(controls.map.advance(now, motion, destinationInput.enteringDestination), now, reason)
     }
 
     private fun setPhase(phase: WalkPhase) {
@@ -393,12 +395,12 @@ class MainActivity : ComponentActivity() {
     private fun setMap(map: BigMapControl, now: Long, reason: String) {
         val previous = controls.map
         controls.map = map
-        if (previous.isOpen && !map.isOpen) destinationInput.close()
+        if (previous.isOpen && !map.isOpen) destinationInput.onMapClosed()
         if (!isDebugBuild() || map == previous) return
         when {
             !map.isOpen -> Log.i("AuraBigMap", "CLOSED reason=$reason now=$now")
             !previous.isOpen -> Log.i("AuraBigMap", "OPEN now=$now deadline=${map.closesAt}")
-            else -> Log.i("AuraBigMap", "SHORTEN now=$now deadline=${map.closesAt}")
+            previous.closesAt != map.closesAt -> Log.i("AuraBigMap", "DEADLINE now=$now deadline=${map.closesAt}")
         }
     }
 

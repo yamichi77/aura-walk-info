@@ -13,13 +13,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
@@ -40,7 +38,7 @@ class BigMapPanelTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun framedButtonsStayOutsideTheMapAndNeitherButtonClosesIt() {
+    fun circularButtonsStayOutsideTheMapAndNeitherButtonClosesIt() {
         val map = mutableStateOf(BigMapControl())
         val state = mutableStateOf(hudTestState(MotionState.STOPPED).copy(mapCenter = null))
         val mode = mutableStateOf(BigMapMode.FLAT)
@@ -52,7 +50,7 @@ class BigMapPanelTest {
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     PhoneScreen(
                         hudVisualSpecFor(state.value, destinationPrompt = prompt.value),
-                        false, HudDebugOptions(), {}, map.value.isOpen, bigMapMode = mode.value,
+                        false, HudDebugOptions(), {}, map.value.isOpen, bigMapMode = mode.value, quantumEnabled = false,
                     ) { target ->
                         when (target) {
                             HudTarget.BIGMAP_MODE -> mode.value = BigMapMode.TILTED
@@ -79,11 +77,12 @@ class BigMapPanelTest {
         val mapBounds = large.getUnclippedBoundsInRoot()
         for (button in listOf(destination, toggle)) {
             assertTrue(button.getUnclippedBoundsInRoot().left > mapBounds.right)
-            assertFrame(view, button, expectedAlpha = 0.6f)
         }
+        assertRingAndIcon(view, "nav_destination", opacity = 1f)
+        assertRingAndIcon(view, "bigmap_mode", opacity = 1f)
         assertTrue(destination.getUnclippedBoundsInRoot().bottom < toggle.getUnclippedBoundsInRoot().top)
         compose.runOnIdle { state.value = state.value.copy(motionState = MotionState.WALKING) }
-        assertFrame(view, toggle, expectedAlpha = 0.42f)
+        assertRingAndIcon(view, "bigmap_mode", opacity = 0.7f)
         toggle.performTouchInput { click(Offset(center.x, 1f)) }
         toggle.assertTextEquals("2D")
         large.assertIsDisplayed()
@@ -102,14 +101,25 @@ class BigMapPanelTest {
         mini.assertIsDisplayed()
     }
 
-    private fun assertFrame(view: View, button: SemanticsNodeInteraction, expectedAlpha: Float) {
-        val bounds = button.getUnclippedBoundsInRoot()
+    private fun assertRingAndIcon(view: View, name: String, opacity: Float) {
+        val bounds = compose.onNodeWithTag("$name-artwork", useUnmergedTree = true).getUnclippedBoundsInRoot()
         val bitmap = compose.runOnIdle { view.drawToBitmap() }
         with(compose.density) {
+            val left = bounds.left.roundToPx()
+            val right = bounds.right.roundToPx()
             val x = ((bounds.left + bounds.right) / 2).roundToPx()
-            val y = bounds.top.roundToPx() + 2.dp.roundToPx()
-            assertEquals(expectedAlpha, Color(bitmap.getPixel(x, y)).blue, 0.02f)
-            assertEquals(Color.Black, Color(bitmap.getPixel(x, y + 2)))
+            val top = bounds.top.roundToPx()
+            val bottom = bounds.bottom.roundToPx()
+            val y = (top + bottom) / 2
+            assertEquals(0.7f * opacity, Color(bitmap.getPixel(x, top)).blue, 0.13f)
+            assertEquals(0.7f * opacity, Color(bitmap.getPixel(left, y)).blue, 0.13f)
+            assertEquals(Color.Black, Color(bitmap.getPixel(left + 1, top + 1)))
+            assertEquals(Color.Black, Color(bitmap.getPixel(right - 2, top + 1)))
+            assertTrue((left + 4 until right - 4).any { iconX ->
+                (top + 4 until bottom - 4).any { iconY ->
+                    Color(bitmap.getPixel(iconX, iconY)).blue > 0.55f * opacity
+                }
+            })
         }
     }
 

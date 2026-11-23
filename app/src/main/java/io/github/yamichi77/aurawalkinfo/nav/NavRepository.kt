@@ -46,11 +46,9 @@ class NavRepository internal constructor(
         }
     }
 
-    fun selectCandidate(candidate: NavCandidate) = selectCandidate(candidate) { true }
-
-    internal fun selectCandidate(candidate: NavCandidate, canStartGuidance: () -> Boolean) = command {
-        if (canStartGuidance() && candidate in (state.value as? NavState.Candidates)?.items.orEmpty()) {
-            replaceOperation { startLive(NavDestination(candidate.point, candidate.name), canStartGuidance) }
+    fun selectCandidate(candidate: NavCandidate) = command {
+        if (candidate in (state.value as? NavState.Candidates)?.items.orEmpty()) {
+            replaceOperation { startLive(NavDestination(candidate.point, candidate.name)) }
         }
     }
 
@@ -89,17 +87,17 @@ class NavRepository internal constructor(
         }
     }
 
-    private suspend fun startLive(destination: NavDestination, canStartGuidance: () -> Boolean = { true }) {
+    private suspend fun startLive(destination: NavDestination) {
         publish(NavState.Routing(destination))
         withLocations(locations) { fixes ->
             val origin = awaitOrigin(fixes)
             if (origin.hasArrived(destination)) {
-                publish(if (canStartGuidance()) NavState.Arrived(destination) else NavState.Idle)
+                publish(NavState.Arrived(destination))
                 return@withLocations
             }
             val route = service.route(origin.navPoint(), destination.point)
             currentCoroutineContext().ensureActive()
-            guide(fixes, destination, route, origin, synthetic = false, canStartGuidance = canStartGuidance)
+            guide(fixes, destination, route, origin, synthetic = false)
         }
         finishArrival()
     }
@@ -139,7 +137,6 @@ class NavRepository internal constructor(
         initialRoute: NavRoute,
         firstFix: LocationSample?,
         synthetic: Boolean,
-        canStartGuidance: () -> Boolean = { true },
     ) {
         var route = initialRoute
         var calculator = GuidanceCalculator(route, destination.point)
@@ -147,7 +144,6 @@ class NavRepository internal constructor(
         var rerouteError: NavError? = null
         var replacement: NavRoute? = null
         var lastFixTime: Long? = null
-        var started = false
         var fix = fixes.latestPendingFix() ?: firstFix ?: fixes.receiveCatching().getOrNull()
 
         while (fix != null) {
@@ -162,11 +158,6 @@ class NavRepository internal constructor(
                     reroutes.resetEvidence()
                 }
                 if (usable) {
-                    if (!started && !canStartGuidance()) {
-                        publish(NavState.Idle)
-                        return
-                    }
-                    started = true
                     val point = fix.navPoint()
                     if (fix.hasArrived(destination)) {
                         publish(NavState.Arrived(destination))

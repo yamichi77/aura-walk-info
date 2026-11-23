@@ -17,6 +17,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
@@ -107,11 +108,7 @@ internal fun QuantumCountdownDigit(
         val height = digitHeight.toPx().coerceAtMost(size.minDimension / 1.92f)
         val orbit = height * orbitRadius
         drawCircle(QuantumCyan, orbit, alpha = 0.34f, style = Stroke(1.dp.toPx()))
-        drawCircle(
-            HudDetail,
-            radius = 2.dp.toPx(),
-            center = center + Offset(cos(frame.electronAngle) * orbit, sin(frame.electronAngle) * orbit),
-        )
+        drawQuantumElectron(orbit, frame.electronAngle)
         translate(center.x, center.y) {
             scale(height, height, pivot = Offset.Zero) {
                 for (glyph in artwork.glyphs) {
@@ -147,11 +144,22 @@ internal fun QuantumCountdownDigit(
 @Composable
 internal fun CountdownRipple(progress: Float, modifier: Modifier) {
     Canvas(modifier) {
-        drawCircle(
-            QuantumCyan,
-            radius = size.minDimension * (0.12f + 0.36f * progress),
-            alpha = 0.8f * (1f - progress),
-            style = Stroke(1.dp.toPx()),
-        )
+        drawQuantumRipple(progress, size.minDimension * 0.12f, size.minDimension * 0.48f)
     }
+}
+
+internal fun DrawScope.drawQuantumElectron(radius: Float, angle: Float) {
+    drawCircle(
+        HudDetail, radius = 2.dp.toPx(),
+        center = center + Offset(cos(angle) * radius, sin(angle) * radius),
+    )
+}
+
+internal fun DrawScope.drawQuantumRipple(progress: Float, startRadius: Float, endRadius: Float) {
+    drawCircle(
+        QuantumCyan,
+        radius = startRadius + (endRadius - startRadius) * progress,
+        alpha = 0.8f * (1f - progress),
+        style = Stroke(1.dp.toPx()),
+    )
 }

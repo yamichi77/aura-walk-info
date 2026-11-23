@@ -143,15 +143,20 @@ internal fun PhoneScreen(
                         bigMapMode = bigMapMode,
                     )
                 }
+                val diameter = mapSize * (HudPlacement.bigMapButtonDiameterMeters / HudPlacement.bigMapSizeMeters)
                 val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
-                if (destinationLabel != null) BigMapButton(
-                    destinationLabel, HudTarget.NAV_DESTINATION, spec.opacity, bigMapQuantum, showBigMap,
-                    onTap, phoneMapButtonLayout(HudPlacement.bigMapDestinationButton, mapSize, gap, buttonWidth, 52.dp),
+                BigMapButton(
+                    destinationLabel, HudTarget.NAV_DESTINATION, spec.opacity, bigMapQuantum, showBigMap, showBigMap,
+                    quantumEnabled, diameter,
+                    onTap, phoneMapButtonLayout(
+                        HudPlacement.bigMapDestinationButton, mapSize, gap, buttonWidth, diameter + 36.dp,
+                    ),
                 )
                 BigMapButton(
-                    bigMapMode.toggleLabel, HudTarget.BIGMAP_MODE, spec.opacity, bigMapQuantum, showBigMap,
+                    bigMapMode.toggleLabel, HudTarget.BIGMAP_MODE, spec.opacity, bigMapQuantum, showBigMap, showBigMap,
+                    quantumEnabled, diameter,
                     onTap, phoneMapButtonLayout(
-                        HudPlacement.bigMapModeButton, mapSize, gap, minOf(44.dp, buttonWidth), 40.dp,
+                        HudPlacement.bigMapModeButton, mapSize, gap, minOf(44.dp, buttonWidth), maxOf(40.dp, diameter + 18.dp),
                     ),
                 )
             }

@@ -38,6 +38,7 @@ class QuantumHudTest {
     private val state = mutableStateOf(hudTestState(MotionState.STOPPED))
     private val phase = mutableStateOf<WalkPhase>(WalkPhase.Standby)
     private val notice = mutableStateOf(false)
+    private val prompt = mutableStateOf<DestinationPrompt>(DestinationPrompt.Map)
     private val map = mutableStateOf(BigMapControl())
     private var now = ZonedDateTime.parse("2026-11-23T09:05:00+09:00")
     private val wallClock = WallClock { now }
@@ -127,7 +128,7 @@ class QuantumHudTest {
         tag("map").performClick()
         frames()
         effect("bigmap")
-        settle()
+        compose.mainClock.advanceTimeBy(QuantumTransitionMillis + 1_100L)
         noEffects()
         tag("bigmap").assertIsDisplayed()
         tag("nav_destination").assertIsDisplayed()
@@ -171,6 +172,43 @@ class QuantumHudTest {
     }
 
     @Test
+    fun mapButtonsGatherThenOrbitOnceAndRippleOnlyOnPinch() {
+        show()
+        settle()
+        tag("map").performClick()
+        frames()
+        for (button in listOf("nav_destination", "bigmap_mode")) {
+            effect("$button-gather")
+            tag("quantum-$button-orbit").assertDoesNotExist()
+        }
+        compose.mainClock.advanceTimeBy(550)
+        for (button in listOf("nav_destination", "bigmap_mode")) {
+            tag("quantum-$button-gather").assertDoesNotExist()
+            effect("$button-orbit")
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        noEffects()
+        tag("bigmap_mode").performClick()
+        frames()
+        effect("bigmap_mode-ripple")
+        tag("quantum-nav_destination-ripple").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(520)
+        noEffects()
+
+        tag("nav_destination").performClick()
+        frames()
+        effect("nav_destination-ripple")
+        tag("nav_destination").assertDoesNotExist()
+        change {
+            state.value = state.value.copy(motionState = MotionState.FAST)
+            map.value = map.value.advance(0, MotionState.FAST)
+        }
+        noEffects()
+        tag("nav_destination").assertDoesNotExist()
+        tag("bigmap_mode").assertDoesNotExist()
+    }
+
+    @Test
     fun disabledUsesOrdinaryTextAndMapFade() {
         show(enabled = false)
         noEffects()
@@ -191,6 +229,9 @@ class QuantumHudTest {
         frames()
         noEffects()
         tag("bigmap").assertIsDisplayed()
+        tag("bigmap_mode").assertIsDisplayed().performClick()
+        frames()
+        noEffects()
         tag("bigmap").performClick()
         frames()
         noEffects()
@@ -215,12 +256,15 @@ class QuantumHudTest {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             AdditiveDisplayTheme {
-                val spec = hudVisualSpecFor(state.value, noticePending = notice.value, phase = phase.value)
+                val spec = hudVisualSpecFor(
+                    state.value, noticePending = notice.value, phase = phase.value, destinationPrompt = prompt.value,
+                )
                 PhoneScreen(
                     spec, false, HudDebugOptions(), {}, map.value.isOpen,
                     quantumEnabled = enabled, wallClock = wallClock,
                 ) {
-                    map.value = map.value.tap(it, 0, state.value.motionState)
+                    if (it == HudTarget.NAV_DESTINATION) prompt.value = DestinationPrompt.Listening()
+                    else map.value = map.value.tap(it, 0, state.value.motionState)
                 }
             }
         }
@@ -246,8 +290,11 @@ class QuantumHudTest {
         animatedTime(time).assertDoesNotExist()
     }
     private fun effect(panel: String) = tag("quantum-$panel").assertExists()
-    private fun noEffects() = listOf("left", "map", "bigmap").forEach {
-        tag("quantum-$it").assertDoesNotExist()
+    private fun noEffects() {
+        for (panel in listOf("left", "map", "bigmap")) tag("quantum-$panel").assertDoesNotExist()
+        for (button in listOf("nav_destination", "bigmap_mode")) {
+            for (effect in listOf("gather", "orbit", "ripple")) tag("quantum-$button-$effect").assertDoesNotExist()
+        }
     }
 
     private fun text(vararg values: String) = values.forEach {

@@ -301,14 +301,14 @@ private fun SpatialHudPanels(
                 }
             }
             val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
-            if (destinationLabel != null) SpatialBigMapButton(
+            SpatialBigMapButton(
                 HudPlacement.bigMapDestinationButton, destinationLabel, HudTarget.NAV_DESTINATION,
-                spec.opacity, bigMapQuantum, showBigMap && inputEnabled, onTap,
+                spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,
                 dpPerMeter, scale, motionOpacity * bigMapAlpha,
             )
             SpatialBigMapButton(
                 HudPlacement.bigMapModeButton, bigMapMode.toggleLabel, HudTarget.BIGMAP_MODE,
-                spec.opacity, bigMapQuantum, showBigMap && inputEnabled, onTap,
+                spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,
                 dpPerMeter, scale, motionOpacity * bigMapAlpha,
             )
         }
@@ -342,16 +342,19 @@ private fun SpatialHudPanels(
 @SubspaceComposable
 private fun SpatialBigMapButton(
     placement: HudPlacement.BigMapButtonPlacement,
-    label: String,
+    label: String?,
     target: HudTarget,
     opacity: Float,
     quantum: QuantumAnimation?,
+    open: Boolean,
     enabled: Boolean,
     onTap: (HudTarget) -> Unit,
     dpPerMeter: Float,
     scale: Float,
     panelAlpha: Float,
 ) {
+    val motion = rememberBigMapButtonMotion(quantum, open, QuantumEffectsEnabled)
+    if (label == null && !motion.rippling) return
     val pose = remember(placement) { placement.pose() }
     SpatialPanel(
         HudPlacement.modifier(pose, dpPerMeter, scale)
@@ -360,7 +363,11 @@ private fun SpatialBigMapButton(
             .alpha(panelAlpha),
         shape = SpatialRoundedCornerShape(CornerSize(0.dp)),
     ) {
-        BigMapButton(label, target, opacity, quantum, enabled, onTap, Modifier.fillMaxSize())
+        BigMapButton(
+            label, target, opacity, quantum, open, enabled, QuantumEffectsEnabled,
+            (HudPlacement.bigMapButtonDiameterMeters * dpPerMeter / scale).dp,
+            onTap, Modifier.fillMaxSize(), motion,
+        )
     }
 }
 
