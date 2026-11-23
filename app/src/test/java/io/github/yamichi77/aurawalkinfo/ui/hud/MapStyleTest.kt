@@ -26,20 +26,21 @@ class MapStyleTest {
     }
 
     @Test
-    fun tiltedMapKeepsBigMapRulesAndAddsDarkBuildingFillAndStroke() {
+    fun tiltedMapKeepsBigMapRulesAndDrawsBuildingsAsDarkOutlines() {
         val flat = loadRules(R.raw.map_style_dark_bigmap)
         val tilted = loadRules(R.raw.map_style_dark_bigmap_3d)
         assertEquals(flat.length() + 2, tilted.length())
         for (index in 0 until flat.length()) {
             assertEquals(flat.getJSONObject(index).toString(), tilted.getJSONObject(index).toString())
         }
-        for (element in listOf("geometry.fill", "geometry.stroke")) {
-            val style = tilted.style("landscape.man_made", element, "color")
-            assertNotNull(style)
-            val color = Color.parseColor(style)
-            val luminance = 0.2126 * Color.red(color) + 0.7152 * Color.green(color) + 0.0722 * Color.blue(color)
-            assertTrue("$element luminance=$luminance", luminance in 1.0..45.0)
-        }
+        // The legacy style cannot separate buildings from built-up ground, so a fill lights the whole
+        // ground on the additive display. Keep the fill black and draw only dim outlines (T20 on AURA).
+        assertEquals("#000000", tilted.style("landscape.man_made", "geometry.fill", "color"))
+        val stroke = tilted.style("landscape.man_made", "geometry.stroke", "color")
+        assertNotNull(stroke)
+        val color = Color.parseColor(stroke)
+        val luminance = 0.2126 * Color.red(color) + 0.7152 * Color.green(color) + 0.0722 * Color.blue(color)
+        assertTrue("geometry.stroke luminance=$luminance", luminance in 1.0..70.0)
     }
 
     private fun loadRules(@RawRes resource: Int): JSONArray {
