@@ -30,6 +30,7 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
     private val clusters = listOf(HudPanel.LEFT, HudPanel.RIGHT)
     private val expected = clusters + if (includeGrid) listOf(HudPanel.GRID) else emptyList()
     private val stationary = expected.associateWith { mutableListOf<Measurement>() }
+    private val clearZone = clusters.associateWith { VisibleClearZone() }
     private var startedAt: Long? = null
     private var poseAvailable = false
     private var rotatingSamples = 0
@@ -42,14 +43,20 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         val start = startedAt ?: now.also { startedAt = it }
         if (pose != null) poseAvailable = true
 
-        if (pose != null && speed != null && speed < HeadMotionGate.StationaryDegreesPerSecond) {
+        if (pose != null && hiddenSince == null) {
+            val isStationary = speed != null && speed < HeadMotionGate.StationaryDegreesPerSecond
             val scene = session.scene
             val inverseHead = scene.perceptionSpace.transformPoseTo(pose, scene.activitySpace).inverse
-            for ((name, measurements) in stationary) {
+            for (name in expected) {
+                val visible = clearZone[name]
+                if (!isStationary && visible == null) continue
                 val panel = panels[name] ?: continue
                 if (panel.entity.isDisposed || panel.width <= 0 || panel.height <= 0) continue
+                if (panelOpacity(name)?.let { it > 0f } != true) continue
                 val relative = inverseHead.compose(panel.entity.getPose(Space.ACTIVITY))
-                measurements += measure(name, relative, panel.width, panel.height)
+                val measurement = measure(name, relative, panel.width, panel.height)
+                if (isStationary) stationary.getValue(name) += measurement
+                visible?.record(measurement.edge, speed)
             }
         }
 
@@ -67,6 +74,8 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
 
         val placementPass = stationary.map { (name, samples) -> reportPlacement(name, samples) }.all { it }
         Log.i(Tag, "placement ${verdict(placementPass)} staticSamples=${stationary.values.minOf { it.size }}")
+        val clearZonePass = clearZone.map { (name, samples) -> samples.report(name) }.all { it }
+        Log.i(Tag, "clearzone ${verdict(clearZonePass)}")
         val followPass = rotatingSamples > 0 && visibleSamples == 0 && missingPanelSamples == 0 && hiddenGridSamples == 0
         Log.i(Tag, "follow ${verdict(followPass)} rotatingSamples=$rotatingSamples " +
             "nonzeroAlpha=$visibleSamples missingPanels=$missingPanelSamples gridNotVisible=$hiddenGridSamples")
@@ -76,6 +85,29 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
     private fun panelOpacity(name: HudPanel): Float? {
         val wrapper = panels[name]?.entity?.takeUnless { it.isDisposed } ?: return null
         return wrapper.children.filterIsInstance<PanelEntity>().singleOrNull()?.getAlpha(Space.ACTIVITY)
+    }
+}
+
+private class VisibleClearZone {
+    private var count = 0
+    private var minimumEdge = Double.POSITIVE_INFINITY
+    private var speedAtMinimum: Double? = null
+
+    fun record(edge: Double, speed: Double?) {
+        count++
+        if (edge.isNaN() || edge < minimumEdge) {
+            minimumEdge = edge
+            speedAtMinimum = speed
+        }
+    }
+
+    fun report(name: HudPanel): Boolean {
+        val pass = minimumEdge.isFinite() && minimumEdge > Layout.clearZoneDegrees
+        val edge = if (count > 0) "${decimal(minimumEdge)}°" else "unavailable"
+        val speed = speedAtMinimum?.let { "${decimal(it)}°/s" } ?: "unavailable"
+        Log.i(Tag, "${name.name} clearzone ${verdict(pass)} visibleSamples=$count " +
+            "innerEdgeMinVisible=$edge speedAtMin=$speed")
+        return pass
     }
 }
 

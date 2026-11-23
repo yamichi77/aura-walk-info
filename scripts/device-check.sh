@@ -181,7 +181,7 @@ check_placement() {
     echo "約12秒計測します。最初の3秒は正面を向き、その後に頭を左右に振ってから止めてください。"
     sleep 12
     collect_run selfcheck xr
-    for check in placement follow; do
+    for check in placement follow clearzone; do
         if grep -Eq "AuraPlacement[[:space:]]*: $check PASS" <<< "$run_log"; then
             record PASS "$check"
         else
