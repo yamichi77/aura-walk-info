@@ -42,15 +42,16 @@ selected() {
 }
 
 adb_retry() {
-    local buffer status=0
+    local buffer status=1 attempt
     # Discard partial stdout from failed attempts, including binary PNG data.
+    # The AURA USB link drops every few seconds, so retry several times (T20, 2026-11-24).
     buffer=$(mktemp) || return 1
-    if "$adb" "$@" > "$buffer" ||
-        { timeout 20s "$adb" wait-for-device >&2 && "$adb" "$@" > "$buffer"; }; then
-        cat "$buffer" || status=$?
-    else
+    for attempt in 1 2 3 4 5; do
+        "$adb" "$@" > "$buffer" && { status=0; break; }
         status=$?
-    fi
+        timeout 20s "$adb" wait-for-device >&2 || true
+    done
+    if (( status == 0 )); then cat "$buffer" || status=$?; fi
     rm -f "$buffer"
     return "$status"
 }
@@ -650,7 +651,7 @@ spatial_align_north() {
 
 check_spatial() {
     local original_marks deadline
-    if ! adb_retry shell pm grant "$pkg" androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
+    if ! adb_retry shell pm grant "$pkg" android.permission.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
         record FAIL 'spatial 空間アンカーの権限'
         return 0
     fi
@@ -830,7 +831,7 @@ check_pics() {
         args+=(--ez preview2d true)
     else
         args+=(--ez selfcheck true)
-        if ! adb_retry shell pm grant "$pkg" androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
+        if ! adb_retry shell pm grant "$pkg" android.permission.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
             record FAIL 'pics 空間アンカーの権限'
         fi
     fi

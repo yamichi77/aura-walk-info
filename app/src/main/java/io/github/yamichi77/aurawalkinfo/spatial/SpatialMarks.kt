@@ -38,7 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-internal const val SCENE_UNDERSTANDING_COARSE = "androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE"
+internal const val SCENE_UNDERSTANDING_COARSE = "android.permission.SCENE_UNDERSTANDING_COARSE"
 private const val TAG = "AuraSpatial"
 private val MarkColors = listOf(Color(0xFF7FDBFF))
 
