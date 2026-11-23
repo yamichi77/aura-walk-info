@@ -63,6 +63,7 @@ data class NavGuidance(
     val remainingDistanceMeters: Double,
     val remainingDuration: Duration,
     val destinationBearingDegrees: Double?,
+    val remainingPolyline: List<NavPoint> = emptyList(),
 )
 
 enum class NavError { NETWORK, PERMISSION, NO_RESULTS, DAILY_LIMIT, NO_FIX, INVALID_INPUT, OTHER }

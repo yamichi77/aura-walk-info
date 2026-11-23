@@ -41,7 +41,7 @@ internal class GuidanceCalculator(private val route: NavRoute, private val desti
     private data class Segment(val start: NavPoint, val end: NavPoint, val offset: Double) {
         val length = start.distanceTo(end)
 
-        fun project(point: NavPoint, minimumProgress: Double): Projection {
+        fun project(point: NavPoint, minimumProgress: Double, index: Int): Projection {
             // Project in a local metric plane. Walking segments are short enough for this approximation.
             val longitudeScale = cos(Math.toRadians((start.latitude + end.latitude) / 2))
             val longitudeDelta = wrapLongitude(end.longitude - start.longitude)
@@ -55,11 +55,11 @@ internal class GuidanceCalculator(private val route: NavRoute, private val desti
                     (point.latitude - start.latitude) * y) / squaredLength
                 ).coerceIn(minimumFraction, 1.0)
             val projected = NavPoint(start.latitude + y * fraction, wrapLongitude(start.longitude + longitudeDelta * fraction))
-            return Projection(projected, offset + length * fraction, point.distanceTo(projected))
+            return Projection(projected, offset + length * fraction, point.distanceTo(projected), index)
         }
     }
 
-    private data class Projection(val point: NavPoint, val progress: Double, val distance: Double)
+    private data class Projection(val point: NavPoint, val progress: Double, val distance: Double, val segmentIndex: Int)
     private val segments: List<Segment>
     private val turnOffsets: List<Double>
     private val length: Double
@@ -114,14 +114,21 @@ internal class GuidanceCalculator(private val route: NavRoute, private val desti
             remainingDistanceMeters = route.distanceMeters * (1 - fraction),
             remainingDuration = Duration.ofMillis((route.duration.toMillis() * (1 - fraction)).toLong()),
             destinationBearingDegrees = position.bearingTo(destination),
+            remainingPolyline = buildList {
+                add(projection.point)
+                for (index in projection.segmentIndex until segments.size) {
+                    val end = segments[index].end
+                    if (last() != end) add(end)
+                }
+            },
         )
     }
 
     private fun project(point: NavPoint, minimum: Double, preferred: Double): Projection {
         var best: Projection? = null
-        for (segment in segments) {
+        for ((index, segment) in segments.withIndex()) {
             if (segment.offset + segment.length < minimum) continue
-            val candidate = segment.project(point, minimum)
+            val candidate = segment.project(point, minimum, index)
             val current = best
             if (current == null || candidate.distance < current.distance - PROJECTION_TIE_METERS ||
                 (abs(candidate.distance - current.distance) <= PROJECTION_TIE_METERS &&

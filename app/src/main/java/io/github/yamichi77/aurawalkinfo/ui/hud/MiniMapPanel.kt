@@ -109,12 +109,15 @@ internal fun MiniMapPanel(
     modifier: Modifier = Modifier,
     bigMapMode: BigMapMode? = null,
     arrowHeight: Dp? = null,
+    routeProjection: ProjectNavPoints? = null,
 ) {
     val context = LocalContext.current
     val hasKey = remember(context) { context.hasMapsKey() }
     val selfCheck = debug.selfCheck && context.isDebugBuild()
     val center = spec.mapCenter
     val mapOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
+    val route = spec.navigation?.route
+    var project by remember { mutableStateOf<ProjectNavPoints?>(null) }
     if (selfCheck) {
         LaunchedEffect(hasKey) {
             if (!hasKey) Log.i(MAP_LOG_TAG, "SKIP key=missing")
@@ -140,7 +143,11 @@ internal fun MiniMapPanel(
                 modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
                 mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
                 buildingsEnabled = bigMapMode?.buildingsEnabled == true,
+                onRouteProjection = { project = it },
             )
+        }
+        if (route != null) (routeProjection ?: project)?.let {
+            NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize())
         }
         MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
     }
@@ -161,8 +168,13 @@ internal fun ClickableMap(
         BoxWithConstraints(modifier) {
             val diameter = minOf(maxHeight, maxWidth)
             val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
+            val listening = enabled && spec.destinationPrompt is DestinationPrompt.Listening
+            val mapOpacity = if (listening) 0.3f else spec.opacity
             MiniMapPanel(
-                spec = spec.copy(mapOpacity = spec.opacity, mapLineOpacity = 0.4f, mapDiameter = HudPlacement.bigMapDiameter),
+                spec = spec.copy(
+                    opacity = mapOpacity, mapOpacity = mapOpacity, mapLineOpacity = 0.4f,
+                    mapDiameter = HudPlacement.bigMapDiameter,
+                ),
                 debug = debug.copy(selfCheck = false),
                 modifier = Modifier.matchParentSize(),
                 arrowHeight = bigMapArrowHeight,
@@ -182,6 +194,10 @@ internal fun ClickableMap(
                     fontSize = labelSize, lineHeight = labelSize, maxLines = 1,
                 )
             }
+            DestinationMapControls(
+                spec.destinationPrompt, spec.navigation != null, diameter,
+                diameter * bigMapModeHitFraction, opacity, enabled, onTap,
+            )
         }
     } else {
         Box(modifier) {
@@ -202,6 +218,7 @@ internal fun MiniMapSurface(
     @RawRes mapStyle: Int,
     buildingsEnabled: Boolean,
     probeCase: String? = null,
+    onRouteProjection: ((ProjectNavPoints?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val properties = remember(context, mapStyle, buildingsEnabled) {
@@ -235,6 +252,7 @@ internal fun MiniMapSurface(
             }
         },
     ) {
+        if (onRouteProjection != null) NavMapProjectionEffect(camera, onRouteProjection)
         MapEffect(selfCheck, captureSnapshot) { map ->
             if (captureSnapshot) sdkMap.complete(map)
             // Finish each animation and use the latest pending fix if updates arrive faster than it.

@@ -252,10 +252,13 @@ private fun SpatialHudPanels(
                 CountdownPanel(countdown, physicalDpPerMeter, onTap, Modifier.fillMaxSize(), inputEnabled)
             }
         }
-        if (spec is HudVisualSpec.Clusters && !locationDenied && !showBigMap) {
+        if (spec is HudVisualSpec.Clusters && !locationDenied) {
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
-            PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
+            spec.navigation?.let { visual ->
+                SpatialNavGuidance(visual, size, dpPerMeter, scale, spec.opacity, motionOpacity)
+            }
+            if (!showBigMap) PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
                 QuantumMap(
                     quantum.miniMap, large = false,
                     Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),

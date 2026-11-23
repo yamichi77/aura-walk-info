@@ -33,6 +33,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
 import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
+import io.github.yamichi77.aurawalkinfo.nav.AndroidDestinationSpeech
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
@@ -40,15 +41,19 @@ import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
 import io.github.yamichi77.aurawalkinfo.session.SessionStartMode
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
+import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapControl
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
+import io.github.yamichi77.aurawalkinfo.ui.hud.DestinationInput
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
+import io.github.yamichi77.aurawalkinfo.ui.hud.isDestinationInput
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -77,6 +82,20 @@ class MainActivity : ComponentActivity() {
     private var headTrackingGranted by mutableStateOf(false)
     private val bleProbePermissionsReady = MutableStateFlow(false)
     private var bigMap3d by mutableStateOf(false)
+    private var microphoneRequest: CompletableDeferred<Boolean>? = null
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        microphoneRequest?.complete(granted)
+        microphoneRequest = null
+    }
+    private val destinationInput by lazy {
+        DestinationInput(
+            lifecycleScope, container.navRepository, AndroidDestinationSpeech(this), ::requestMicrophone,
+            Clock(SystemClock::elapsedRealtime),
+        ) {
+            (locationGranted || fakeMotion != null) && !visibility.noticePending &&
+                controls.map.advance(SystemClock.elapsedRealtime(), currentMotion()).isOpen
+        }
+    }
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshPermissions()
         bleProbePermissionsReady.value = true
@@ -176,10 +195,12 @@ class MainActivity : ComponentActivity() {
                     DiagnosticsScreen(this, mode, debug.capture)
                 } else {
                     val state by repository.state.collectAsStateWithLifecycle()
+                    val navState by container.navRepository.state.collectAsStateWithLifecycle()
                     val spec = hudVisualSpecFor(
                         debug.fakeState ?: state, noticePending = visibility.noticePending,
                         phase = controls.phase, countdown = controls.seconds,
                         startingFromSummary = controls.startingFromSummary,
+                        navState = navState, destinationPrompt = destinationInput.prompt,
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
                     val bigMapMode = if (bigMap3d) BigMapMode.TILTED else BigMapMode.FLAT
@@ -226,6 +247,16 @@ class MainActivity : ComponentActivity() {
     private fun refreshPermissions() {
         locationGranted = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
         headTrackingGranted = hasPermission(HEAD_TRACKING)
+        if (!locationGranted && fakeMotion == null) destinationInput.close()
+    }
+
+    private suspend fun requestMicrophone(): Boolean {
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) return true
+        val request = microphoneRequest ?: CompletableDeferred<Boolean>().also {
+            microphoneRequest = it
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        return request.await()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -255,6 +286,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        destinationInput.close()
         debugTapReceiver?.let(::unregisterReceiver)
         super.onDestroy()
     }
@@ -294,6 +326,8 @@ class MainActivity : ComponentActivity() {
                     bigMap3d = !bigMap3d
                     container.hudSettings.bigMap3d = bigMap3d
                 }
+            } else if (hit.isDestinationInput) {
+                destinationInput.tap(hit)
             } else {
                 setMap(controls.map.tap(hit, now, motion), now, "tap")
             }
@@ -344,6 +378,7 @@ class MainActivity : ComponentActivity() {
     private fun setMap(map: BigMapControl, now: Long, reason: String) {
         val previous = controls.map
         controls.map = map
+        if (previous.isOpen && !map.isOpen) destinationInput.close()
         if (!isDebugBuild() || map == previous) return
         when {
             !map.isOpen -> Log.i("AuraBigMap", "CLOSED reason=$reason now=$now")
