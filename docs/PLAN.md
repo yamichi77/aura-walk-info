@@ -370,7 +370,7 @@ app/src/main/java/<package>/walkinfo/
 
 ### 9.2 Google Cloud でユーザーがすること
 
-- Routes API と Places API（New）を有効にする。課金が想定外に増えないよう、それぞれ 1 日の上限（例: Routes 300 回、Places 100 回）を設定する
+- Routes API と Places API（New）を有効にする。課金が想定外に増えないよう、それぞれ 1 日の上限（Routes 300 回、Places 150 回。アプリ側の上限と同じ値）を設定する
 - API キーの扱いは今までどおり。`local.properties` に置き、コミットしない
 
 ### 9.3 タスク
