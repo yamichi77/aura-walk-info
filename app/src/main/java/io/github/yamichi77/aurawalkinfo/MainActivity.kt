@@ -53,6 +53,8 @@ import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapControl
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
+import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapViewport
+import io.github.yamichi77.aurawalkinfo.location.AndroidReverseGeocoder
 import io.github.yamichi77.aurawalkinfo.ui.hud.DestinationInput
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
@@ -93,6 +95,9 @@ class MainActivity : ComponentActivity() {
     private var spatialAnchorGranted by mutableStateOf(false)
     private val bleProbePermissionsReady = MutableStateFlow(false)
     private var bigMap3d by mutableStateOf(false)
+    private val bigMapViewport = BigMapViewport()
+    private val mapPointGeocoder by lazy { AndroidReverseGeocoder(applicationContext) }
+    private val bigMapMode get() = if (bigMap3d) BigMapMode.TILTED else BigMapMode.FLAT
     private var microphoneRequest: CompletableDeferred<Boolean>? = null
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         microphoneRequest?.complete(granted)
@@ -238,7 +243,6 @@ class MainActivity : ComponentActivity() {
                         navState = navState, destinationPrompt = destinationInput.prompt,
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
-                    val bigMapMode = if (bigMap3d) BigMapMode.TILTED else BigMapMode.FLAT
                     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled && !debug.preview2d
                     ObserveHeadPoses(
                         container.headPoses, container.headingTracking,
@@ -281,6 +285,7 @@ class MainActivity : ComponentActivity() {
                                 skyBandSettings, container.headingTracking,
                                 SkyBandTargets.from(navState, signal),
                                 showGeospatialConsent = geospatialEligible,
+                                viewport = bigMapViewport, onMapPan = ::interactWithMap, onMapHold = ::selectMapPoint,
                             )
                         }
                     } else {
@@ -288,6 +293,7 @@ class MainActivity : ComponentActivity() {
                             spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
                             quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
                             bigMapMode = bigMapMode, onTap = onTap,
+                            viewport = bigMapViewport, onMapPan = ::interactWithMap, onMapHold = ::selectMapPoint,
                         )
                     }
                 }
@@ -378,18 +384,33 @@ class MainActivity : ComponentActivity() {
                 if (isDebugBuild()) Log.i("AuraHud", "notice dismissed by tap")
             } else if (hit == HudTarget.LEFT || hit == HudTarget.COUNTDOWN && countingDown) {
                 setPhase(controls.phase.tap(now, motion))
-            } else if (hit == HudTarget.BIGMAP_MODE) {
-                if (controls.map.isOpen) {
-                    bigMap3d = !bigMap3d
-                    container.hudSettings.bigMap3d = bigMap3d
-                }
-            } else if (hit.isDestinationInput) {
-                destinationInput.tap(hit)
             } else {
                 setMap(controls.map.tap(hit, now, motion, destinationInput.enteringDestination), now, "tap")
+                if (controls.map.isOpen) when (hit) {
+                    HudTarget.BIGMAP_MODE -> {
+                        bigMap3d = !bigMap3d
+                        bigMapViewport.resetZoom()
+                        container.hudSettings.bigMap3d = bigMap3d
+                    }
+                    HudTarget.BIGMAP_ZOOM_IN -> bigMapViewport.zoomBy(bigMapMode, 1)
+                    HudTarget.BIGMAP_ZOOM_OUT -> bigMapViewport.zoomBy(bigMapMode, -1)
+                    HudTarget.BIGMAP_RECENTER -> bigMapViewport.recenter()
+                    else -> if (hit.isDestinationInput) destinationInput.tap(hit)
+                }
             }
         }
         scheduleControls(now)
+    }
+
+    private fun interactWithMap() {
+        val now = SystemClock.elapsedRealtime()
+        setMap(controls.map.interact(now, currentMotion(), destinationInput.enteringDestination), now, "map-interaction")
+        scheduleControls(now)
+    }
+
+    private fun selectMapPoint(point: NavPoint) {
+        interactWithMap()
+        destinationInput.selectMapPoint(point, mapPointGeocoder)
     }
 
     private fun refreshControls() {
@@ -435,6 +456,10 @@ class MainActivity : ComponentActivity() {
     private fun setMap(map: BigMapControl, now: Long, reason: String) {
         val previous = controls.map
         controls.map = map
+        if (!previous.isOpen && map.isOpen) {
+            bigMapViewport.recenter()
+            bigMapViewport.resetZoom()
+        }
         if (previous.isOpen && !map.isOpen) destinationInput.onMapClosed()
         if (!isDebugBuild() || map == previous) return
         when {

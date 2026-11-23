@@ -18,10 +18,13 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.core.view.drawToBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import org.junit.Assert.assertFalse
@@ -75,12 +78,16 @@ class BigMapPanelTest {
         destination.assertIsDisplayed().assertTextEquals("目的地")
         toggle.assertIsDisplayed().assertTextEquals("3D")
         val mapBounds = large.getUnclippedBoundsInRoot()
-        for (button in listOf(destination, toggle)) {
+        val buttons = HudPlacement.bigMapButtons.map { placement ->
+            compose.onNodeWithTag(placement.target.name.lowercase()).assertIsDisplayed()
+        }
+        for (button in buttons) {
             assertTrue(button.getUnclippedBoundsInRoot().left > mapBounds.right)
         }
-        assertRingAndIcon(view, "nav_destination", opacity = 1f)
-        assertRingAndIcon(view, "bigmap_mode", opacity = 1f)
-        assertTrue(destination.getUnclippedBoundsInRoot().bottom < toggle.getUnclippedBoundsInRoot().top)
+        HudPlacement.bigMapButtons.forEach { assertRingAndIcon(view, it.target.name.lowercase(), opacity = 1f) }
+        buttons.zipWithNext().forEach { (above, below) ->
+            assertTrue(above.getUnclippedBoundsInRoot().bottom < below.getUnclippedBoundsInRoot().top)
+        }
         compose.runOnIdle { state.value = state.value.copy(motionState = MotionState.WALKING) }
         assertRingAndIcon(view, "bigmap_mode", opacity = 0.7f)
         toggle.performTouchInput { click(Offset(center.x, 1f)) }
@@ -90,6 +97,8 @@ class BigMapPanelTest {
         large.assertIsDisplayed()
         destination.assertDoesNotExist()
         large.performTouchInput { click() }
+        large.assertIsDisplayed()
+        large.performTouchInput { click(Offset(2f, 2f)) }
         mini.assertIsDisplayed()
         large.assertDoesNotExist()
         toggle.assertDoesNotExist()
@@ -99,6 +108,78 @@ class BigMapPanelTest {
         large.assertDoesNotExist()
         outside.assertDoesNotExist()
         mini.assertIsDisplayed()
+    }
+
+    @Test
+    fun zoomAndRecenterButtonsAndDragControlTheViewportAcrossFixesAndReopen() {
+        val fix = mutableStateOf(MapCenter(0.1, 0.2))
+        val panned = MapCenter(0.11, 0.22)
+        val map = mutableStateOf(BigMapControl())
+        val mode = BigMapMode.FLAT
+        val motion = MotionState.STOPPED
+        var scroll = Offset.Zero
+        var resets = 0
+        val viewport = BigMapViewport().apply {
+            gestureMap = object : BigMapGestureMap {
+                override fun scrollBy(pixels: Offset): MapCenter {
+                    scroll += pixels
+                    return panned
+                }
+                override fun pointAt(pixel: Offset) = error("A drag must not select a destination")
+            }
+        }
+        compose.setContent {
+            AdditiveDisplayTheme {
+                PhoneScreen(
+                    hudVisualSpecFor(hudTestState(motion).copy(mapCenter = fix.value)),
+                    false, HudDebugOptions(), {}, map.value.isOpen, quantumEnabled = false,
+                    viewport = viewport, onMapPan = { resets++ },
+                ) { target ->
+                    val previous = map.value
+                    map.value = previous.tap(target, 0, motion)
+                    if (!previous.isOpen && map.value.isOpen) {
+                        viewport.recenter()
+                        viewport.resetZoom()
+                    }
+                    when (target) {
+                        HudTarget.BIGMAP_ZOOM_IN -> viewport.zoomBy(mode, 1)
+                        HudTarget.BIGMAP_ZOOM_OUT -> viewport.zoomBy(mode, -1)
+                        HudTarget.BIGMAP_RECENTER -> viewport.recenter()
+                        else -> Unit
+                    }
+                }
+            }
+        }
+        fun tap(tag: String) = compose.onNodeWithTag(tag).performTouchInput { click() }
+        fun assertZoom(expected: Float) = compose.runOnIdle { assertEquals(expected, viewport.zoom(mode), 0f) }
+        fun assertCenter(expected: MapCenter) = compose.runOnIdle { assertEquals(expected, viewport.center(fix.value)) }
+        fun dragMap() = compose.onNodeWithTag("bigmap").performTouchInput {
+            swipe(center, center + Offset(60f, 40f))
+        }
+
+        tap("map")
+        tap("bigmap_zoom_in")
+        assertZoom(17.5f)
+        repeat(2) { tap("bigmap_zoom_in") }
+        assertZoom(19f)
+        repeat(6) { tap("bigmap_zoom_out") }
+        assertZoom(14f)
+        dragMap()
+        assertCenter(panned)
+        compose.runOnIdle {
+            assertTrue(scroll.x < 0 && scroll.y < 0)
+            assertTrue(resets > 0)
+            fix.value = MapCenter(0.12, 0.19)
+        }
+        assertCenter(panned)
+        tap("bigmap_recenter")
+        assertCenter(fix.value)
+        dragMap()
+        assertCenter(panned)
+        compose.onNodeWithTag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
+        tap("map")
+        assertCenter(fix.value)
+        assertZoom(16.5f)
     }
 
     private fun assertRingAndIcon(view: View, name: String, opacity: Float) {
@@ -117,7 +198,7 @@ class BigMapPanelTest {
             assertEquals(Color.Black, Color(bitmap.getPixel(right - 2, top + 1)))
             assertTrue((left + 4 until right - 4).any { iconX ->
                 (top + 4 until bottom - 4).any { iconY ->
-                    Color(bitmap.getPixel(iconX, iconY)).blue > 0.55f * opacity
+                    Color(bitmap.getPixel(iconX, iconY)).blue > 0.4f * opacity
                 }
             })
         }

@@ -3,7 +3,8 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 
 internal enum class HudTarget {
-    LEFT, MAP, BIGMAP, OUTSIDE, COUNTDOWN, BIGMAP_MODE,
+    LEFT, MAP, BIGMAP, OUTSIDE, COUNTDOWN, BIGMAP_MODE, BIGMAP_ZOOM_IN, BIGMAP_ZOOM_OUT,
+    BIGMAP_RECENTER,
     NAV_DESTINATION, NAV_CANDIDATE_1, NAV_CANDIDATE_2, NAV_CANDIDATE_3, NAV_CANCEL,
 }
 
@@ -33,10 +34,20 @@ internal data class BigMapControl(
             HudTarget.MAP -> if (current.isOpen || motion == MotionState.FAST) current else {
                 BigMapControl(deadline(now, motion)).advance(now, motion, destinationInput)
             }
-            HudTarget.BIGMAP, HudTarget.OUTSIDE -> BigMapControl()
-            HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP_MODE -> current
+            HudTarget.OUTSIDE -> BigMapControl()
+            HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP -> current
+            HudTarget.BIGMAP_MODE, HudTarget.BIGMAP_ZOOM_IN, HudTarget.BIGMAP_ZOOM_OUT, HudTarget.BIGMAP_RECENTER,
             HudTarget.NAV_DESTINATION, HudTarget.NAV_CANDIDATE_1, HudTarget.NAV_CANDIDATE_2,
-            HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_CANCEL -> current
+            HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_CANCEL -> current.interact(now, motion, destinationInput)
+        }
+    }
+
+    fun interact(now: Long, motion: MotionState, destinationInput: Boolean): BigMapControl {
+        if (!advance(now, motion, destinationInput).isOpen) return BigMapControl()
+        return if (motion == MotionState.STOPPED && destinationInput) {
+            BigMapControl(enteringDestination = true)
+        } else {
+            BigMapControl(deadline(now, motion), destinationInput)
         }
     }
 

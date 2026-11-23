@@ -4,6 +4,7 @@ import io.github.yamichi77.aurawalkinfo.location.LocationSample
 import io.github.yamichi77.aurawalkinfo.safety.MotionThresholds
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -46,14 +47,14 @@ class NavRepository internal constructor(
         }
     }
 
-    fun selectCandidate(candidate: NavCandidate) = command {
+    fun selectCandidate(candidate: NavCandidate) = scope.launch {
         if (candidate in (state.value as? NavState.Candidates)?.items.orEmpty()) {
-            replaceOperation { startLive(NavDestination(candidate.point, candidate.name)) }
+            startRoute(NavDestination(candidate.point, candidate.name))
         }
     }
 
-    fun navigateTo(point: NavPoint) = command {
-        replaceOperation { startLive(NavDestination(point)) }
+    fun navigateTo(point: NavPoint, name: String? = null) = scope.launch {
+        startRoute(NavDestination(point, name))
     }
 
     fun cancel() = command {
@@ -76,9 +77,14 @@ class NavRepository internal constructor(
         scope.launch { action() }
     }
 
-    private fun replaceOperation(action: suspend () -> Unit) {
+    private fun startRoute(destination: NavDestination) {
+        // Publish Routing before the command completes, even when the scope queues new jobs.
+        replaceOperation(start = CoroutineStart.UNDISPATCHED) { startLive(destination) }
+    }
+
+    private fun replaceOperation(start: CoroutineStart = CoroutineStart.DEFAULT, action: suspend () -> Unit) {
         operation?.cancel()
-        operation = scope.launch {
+        operation = scope.launch(start = start) {
             try {
                 action()
             } catch (failure: NavFailure) {

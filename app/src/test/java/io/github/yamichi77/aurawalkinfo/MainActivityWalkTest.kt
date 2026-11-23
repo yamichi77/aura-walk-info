@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Looper
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
@@ -142,7 +143,7 @@ class MainActivityWalkTest {
     }
 
     @Test
-    fun bigMapSwitchKeepsItsDeadlineAndPersistsAcrossReopenAndNewActivity() {
+    fun bigMapSwitchRenewsItsDeadlineAndPersistsAcrossReopenAndNewActivity() {
         val app = ApplicationProvider.getApplicationContext<AuraWalkApplication>()
         app.applicationInfo.flags = app.applicationInfo.flags or ApplicationInfo.FLAG_DEBUGGABLE
         val intent = Intent(app, MainActivity::class.java).putExtra("fakeState", "stopped")
@@ -161,9 +162,11 @@ class MainActivityWalkTest {
             toggle.performTouchInput { click() }
             show2d.assertIsDisplayed()
             big.assertIsDisplayed()
-            assertEquals(deadline, controls.map.closesAt)
+            assertTrue(checkNotNull(controls.map.closesAt) >= checkNotNull(deadline) + 2_000L)
             compose.onNodeWithTag("quantum-bigmap").assertDoesNotExist()
             big.performTouchInput { click() }
+            big.assertIsDisplayed()
+            compose.onNodeWithTag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
             toggle.assertDoesNotExist()
             mini.assertIsDisplayed().performClick()
             show2d.assertIsDisplayed()

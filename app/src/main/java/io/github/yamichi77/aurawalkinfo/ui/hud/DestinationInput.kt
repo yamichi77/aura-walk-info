@@ -3,9 +3,12 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.yamichi77.aurawalkinfo.location.JapaneseAddressFormatter
+import io.github.yamichi77.aurawalkinfo.location.ReverseGeocoder
 import io.github.yamichi77.aurawalkinfo.nav.DestinationSpeech
 import io.github.yamichi77.aurawalkinfo.nav.MicrophoneDenied
 import io.github.yamichi77.aurawalkinfo.nav.NavCandidate
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavRepository
 import io.github.yamichi77.aurawalkinfo.nav.NavState
 import io.github.yamichi77.aurawalkinfo.nav.SpeechResult
@@ -16,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal sealed interface DestinationPrompt {
     data object Map : DestinationPrompt
@@ -82,6 +86,18 @@ internal class DestinationInput(
         if (prompt != DestinationPrompt.Routing) close()
     }
 
+    fun selectMapPoint(point: NavPoint, geocoder: ReverseGeocoder) {
+        if (!mapAcceptsInput() || prompt != DestinationPrompt.Map) return
+        show(DestinationPrompt.Routing)
+        work = scope.launch {
+            val address = withTimeoutOrNull(3_000L) { geocoder.lookup(point.latitude, point.longitude) }
+            val name = address?.let(JapaneseAddressFormatter::oneLine)?.takeIf(String::isNotBlank)
+                ?: "地図で選んだ場所"
+            nav.navigateTo(point, name).join()
+            awaitRoute()
+        }
+    }
+
     fun close() {
         work?.cancel()
         work = null
@@ -133,18 +149,23 @@ internal class DestinationInput(
 
     private fun route(candidate: NavCandidate) {
         show(DestinationPrompt.Routing)
-        nav.selectCandidate(candidate)
+        val start = nav.selectCandidate(candidate)
         work = scope.launch {
-            val result = nav.state.first { it.isNavigationActive || it is NavState.Error || it == NavState.Idle }
-            if (result is NavState.Error) {
-                nav.cancel()
-                if (mapAcceptsInput()) {
-                    showMessage(result.reason.hudMessage(searching = false))
-                    return@launch
-                }
-            }
-            show(DestinationPrompt.Map)
+            start.join()
+            awaitRoute()
         }
+    }
+
+    private suspend fun awaitRoute() {
+        val result = nav.state.first { it.isNavigationActive || it is NavState.Error || it == NavState.Idle }
+        if (result is NavState.Error) {
+            nav.cancel()
+            if (mapAcceptsInput()) {
+                showMessage(result.reason.hudMessage(searching = false))
+                return
+            }
+        }
+        show(DestinationPrompt.Map)
     }
 
     private fun confirmEnd() {

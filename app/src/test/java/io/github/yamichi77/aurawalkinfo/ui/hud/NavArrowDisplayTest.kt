@@ -40,6 +40,7 @@ class NavArrowDisplayTest {
     private val nav = mutableStateOf<NavState>(guiding)
     private val motion = mutableStateOf(MotionState.WALKING)
     private val gpsCourse = mutableStateOf<Float?>(0f)
+    private val bigMapOpen = mutableStateOf(false)
     private lateinit var view: View
 
     @Test
@@ -78,6 +79,20 @@ class NavArrowDisplayTest {
         arrow().assertDoesNotExist()
     }
 
+    @Test
+    fun openBigMapHidesBothGuidanceLinesAndTheEdgeArrow() {
+        render(headBearing = { 0.0 })
+        val primary = compose.onNodeWithText("40m先 右")
+        val secondary = compose.onNodeWithText("残り 91m・2分")
+        primary.assertIsDisplayed()
+        secondary.assertIsDisplayed()
+        arrow().assertIsDisplayed()
+        compose.runOnIdle { bigMapOpen.value = true }
+        primary.assertDoesNotExist()
+        secondary.assertDoesNotExist()
+        arrow().assertDoesNotExist()
+    }
+
     private fun render(headBearing: (Long) -> Double?) {
         compose.setContent {
             AdditiveDisplayTheme {
@@ -87,7 +102,7 @@ class NavArrowDisplayTest {
                     navState = nav.value,
                 )
                 if (spec is HudVisualSpec.Clusters) {
-                    spec.navigation?.let {
+                    spec.rightClusterNavigation(bigMapOpen.value)?.let {
                         Box(Modifier.width(360.dp).background(Color.Black)) {
                             NavGuidanceContent(it, spec.opacity, dpPerMeter = 1_000f, headBearing = headBearing)
                         }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Outline
+import android.graphics.Point
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -29,8 +30,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -52,8 +55,10 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.Map3dSnapshotCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.saveProbePng
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -105,11 +110,13 @@ internal fun MiniMapPanel(
     bigMapMode: BigMapMode? = null,
     arrowHeight: Dp? = null,
     routeProjection: ProjectNavPoints? = null,
+    viewport: BigMapViewport? = null,
 ) {
     val context = LocalContext.current
     val hasKey = remember(context) { context.hasMapsKey() }
     val selfCheck = debug.selfCheck && context.isDebugBuild()
     val center = spec.mapCenter
+    val cameraCenter = viewport?.center(center) ?: center
     val mapOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
     val route = spec.navigation?.route
     var project by remember { mutableStateOf<ProjectNavPoints?>(null) }
@@ -124,8 +131,12 @@ internal fun MiniMapPanel(
     }
 
     BoxWithConstraints(modifier) {
-        if (center != null && hasKey) {
-            val position = bigMapMode?.cameraPosition(center) ?: northUpCameraPosition(center, MAP_ZOOM)
+        if (cameraCenter != null && hasKey) {
+            val position = if (bigMapMode != null && viewport != null) {
+                bigMapMode.cameraPosition(cameraCenter, viewport.zoom(bigMapMode))
+            } else {
+                bigMapMode?.cameraPosition(cameraCenter) ?: northUpCameraPosition(cameraCenter, MAP_ZOOM)
+            }
             if (selfCheck) {
                 LaunchedEffect(position) {
                     Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}")
@@ -141,12 +152,20 @@ internal fun MiniMapPanel(
                 buildingsEnabled = bigMapMode?.buildingsEnabled == true,
                 camera = camera,
                 onRouteProjection = { project = it },
+                viewport = viewport,
             )
         }
         if (route != null) (routeProjection ?: project)?.let {
             NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize())
         }
-        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
+        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck) { canvasCenter ->
+            val projection = project
+            if (viewport != null && projection != null) {
+                center?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
+            } else {
+                canvasCenter
+            }
+        }
     }
 }
 
@@ -160,6 +179,9 @@ internal fun ClickableMap(
     enabled: Boolean = true,
     bigMapArrowHeight: Dp? = null,
     bigMapMode: BigMapMode = BigMapMode.FLAT,
+    viewport: BigMapViewport? = null,
+    onMapPan: () -> Unit = {},
+    onMapHold: (NavPoint) -> Unit = {},
 ) {
     if (target == HudTarget.BIGMAP) {
         BoxWithConstraints(modifier) {
@@ -175,8 +197,24 @@ internal fun ClickableMap(
                 modifier = Modifier.matchParentSize(),
                 arrowHeight = bigMapArrowHeight,
                 bigMapMode = bigMapMode,
+                viewport = viewport,
             )
-            Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
+            val onPan by rememberUpdatedState<(Offset) -> Unit> { delta ->
+                viewport?.pan(delta)
+                onMapPan()
+            }
+            val onHold by rememberUpdatedState<(Offset) -> Unit> { pixel ->
+                if (spec.destinationPrompt == DestinationPrompt.Map) {
+                    viewport?.gestureMap?.pointAt(pixel)?.let(onMapHold)
+                }
+            }
+            val onOutside by rememberUpdatedState { onTap(HudTarget.OUTSIDE) }
+            Box(
+                Modifier.matchParentSize().testTag("bigmap").then(
+                    if (enabled) Modifier.bigMapGestures({ onPan(it) }, { onHold(it) }, { onOutside() })
+                    else Modifier,
+                ),
+            )
             DestinationMapOverlay(spec.destinationPrompt, diameter, enabled, onTap)
         }
     } else {
@@ -200,6 +238,7 @@ internal fun MiniMapSurface(
     probeCase: String? = null,
     camera: CameraPositionState = rememberCameraPositionState { this.position = position },
     onRouteProjection: ((ProjectNavPoints?) -> Unit)? = null,
+    viewport: BigMapViewport? = null,
 ) {
     val context = LocalContext.current
     val properties = remember(context, mapStyle, buildingsEnabled) {
@@ -233,19 +272,27 @@ internal fun MiniMapSurface(
         },
     ) {
         if (onRouteProjection != null) NavMapProjectionEffect(camera, onRouteProjection)
-        MapEffect(selfCheck, captureSnapshot) { map ->
+        MapEffect(selfCheck, captureSnapshot, viewport) { map ->
             if (captureSnapshot) sdkMap.complete(map)
+            val gestureMap = if (viewport != null) SdkBigMapGestureMap(map) else null
+            if (viewport != null) viewport.gestureMap = gestureMap
             // Finish each animation and use the latest pending fix if updates arrive faster than it.
-            snapshotFlow { target }.conflate().collect { next ->
-                if (camera.position != next) {
-                    try {
-                        camera.animate(CameraUpdateFactory.newCameraPosition(next), CAMERA_ANIMATION_MS)
-                    } catch (_: CancellationException) {
-                        // SDK cancellation can interrupt one animation while the panel is still active.
-                        currentCoroutineContext().ensureActive()
+            try {
+                snapshotFlow { target }.conflate().collect { next ->
+                    if (viewport != null) {
+                        if (map.cameraPosition != next) map.moveCamera(CameraUpdateFactory.newCameraPosition(next))
+                    } else if (camera.position != next) {
+                        try {
+                            camera.animate(CameraUpdateFactory.newCameraPosition(next), CAMERA_ANIMATION_MS)
+                        } catch (_: CancellationException) {
+                            // SDK cancellation can interrupt one animation while the panel is still active.
+                            currentCoroutineContext().ensureActive()
+                        }
                     }
+                    if (selfCheck) Log.i(MAP_LOG_TAG, "camera bearing=${map.cameraPosition.bearing}")
                 }
-                if (selfCheck) Log.i(MAP_LOG_TAG, "camera bearing=${map.cameraPosition.bearing}")
+            } finally {
+                if (viewport != null && viewport.gestureMap === gestureMap) viewport.gestureMap = null
             }
         }
     }
@@ -270,6 +317,19 @@ internal fun MiniMapSurface(
             }
         }
     }
+}
+
+private class SdkBigMapGestureMap(private val map: SdkMap) : BigMapGestureMap {
+    override fun scrollBy(pixels: Offset): MapCenter {
+        map.moveCamera(CameraUpdateFactory.scrollBy(pixels.x, pixels.y))
+        val target = map.cameraPosition.target
+        return MapCenter(target.latitude, target.longitude)
+    }
+
+    override fun pointAt(pixel: Offset): NavPoint? =
+        map.projection.fromScreenLocation(Point(pixel.x.roundToInt(), pixel.y.roundToInt()))?.let {
+            NavPoint(it.latitude, it.longitude)
+        }
 }
 
 internal fun Context.hasMapsKey(): Boolean {
