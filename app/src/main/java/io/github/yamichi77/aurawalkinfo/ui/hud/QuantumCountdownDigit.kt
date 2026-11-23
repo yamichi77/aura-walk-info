@@ -28,7 +28,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-private val cyan = Color(0xFF7FDBFF)
+internal val QuantumCyan = Color(0xFF7FDBFF)
 private const val orbitRadius = 0.65f
 
 internal class CountdownArtwork(seed: Int = 11) {
@@ -40,33 +40,41 @@ internal class CountdownArtwork(seed: Int = 11) {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
         val text = digit.toString()
-        val path = android.graphics.Path()
-        paint.getTextPath(text, 0, text.length, 0f, 0f, path)
+        val path = quantumTextPath(text, paint)
         val bounds = RectF()
         path.computeBounds(bounds, true)
         path.offset(-bounds.centerX(), -bounds.centerY())
         val factor = 1f / bounds.height()
         path.transform(Matrix().apply { setScale(factor, factor) })
 
-        val measure = PathMeasure(path, false)
-        var length = 0f
-        do {
-            length += measure.length
-        } while (measure.nextContour())
-        measure.setPath(path, false)
-        var contourStart = 0f
-        val position = FloatArray(2)
-        val random = Random(seed + digit)
-        val particles = List(COUNTDOWN_PARTICLE_COUNT) { index ->
-            val distance = (index + 0.5f) * length / COUNTDOWN_PARTICLE_COUNT
-            while (distance > contourStart + measure.length) {
-                contourStart += measure.length
-                if (!measure.nextContour()) break
-            }
-            measure.getPosTan(distance - contourStart, position, null)
-            CountdownParticle(CountdownPoint(position[0], position[1]), random)
+        Glyph(digit, path.asComposePath(), sampleQuantumPath(path, COUNTDOWN_PARTICLE_COUNT, seed + digit))
+    }
+}
+
+internal fun quantumTextPath(text: String, paint: Paint) = android.graphics.Path().apply {
+    paint.getTextPath(text, 0, text.length, 0f, 0f, this)
+}
+
+internal fun sampleQuantumPath(path: android.graphics.Path, count: Int, seed: Int): List<QuantumParticle> {
+    val measure = PathMeasure(path, false)
+    var length = 0f
+    do {
+        length += measure.length
+    } while (measure.nextContour())
+    if (length <= 0f) return emptyList()
+
+    measure.setPath(path, false)
+    var contourStart = 0f
+    val position = FloatArray(2)
+    val random = Random(seed)
+    return List(count) { index ->
+        val distance = (index + 0.5f) * length / count
+        while (distance > contourStart + measure.length) {
+            contourStart += measure.length
+            if (!measure.nextContour()) break
         }
-        Glyph(digit, path.asComposePath(), particles)
+        measure.getPosTan(distance - contourStart, position, null)
+        QuantumParticle(QuantumPoint(position[0], position[1]), random)
     }
 }
 
@@ -98,7 +106,7 @@ internal fun QuantumCountdownDigit(
         val frame = QuantumCountdownFrame(elapsed.floatValue)
         val height = digitHeight.toPx().coerceAtMost(size.minDimension / 1.92f)
         val orbit = height * orbitRadius
-        drawCircle(cyan, orbit, alpha = 0.34f, style = Stroke(1.dp.toPx()))
+        drawCircle(QuantumCyan, orbit, alpha = 0.34f, style = Stroke(1.dp.toPx()))
         drawCircle(
             HudDetail,
             radius = 2.dp.toPx(),
@@ -116,7 +124,7 @@ internal fun QuantumCountdownDigit(
                         sway * cos(frame.jitterPhase + glyph.digit),
                     ) {
                         drawPath(
-                            glyph.outline, if (correct) HudText else cyan, alpha = alpha,
+                            glyph.outline, if (correct) HudText else QuantumCyan, alpha = alpha,
                             style = Stroke(1.dp.toPx() / height),
                         )
                     }
@@ -127,7 +135,7 @@ internal fun QuantumCountdownDigit(
         for (index in particles.indices) {
             val particle = particles[index]
             drawCircle(
-                if (index % 4 == 0) HudText else cyan,
+                if (index % 4 == 0) HudText else QuantumCyan,
                 radius = particle.radiusDp.dp.toPx(),
                 center = center + Offset(particle.x(frame) * height, particle.y(frame) * height),
                 alpha = frame.particleAlpha,
@@ -140,7 +148,7 @@ internal fun QuantumCountdownDigit(
 internal fun CountdownRipple(progress: Float, modifier: Modifier) {
     Canvas(modifier) {
         drawCircle(
-            cyan,
+            QuantumCyan,
             radius = size.minDimension * (0.12f + 0.36f * progress),
             alpha = 0.8f * (1f - progress),
             style = Stroke(1.dp.toPx()),

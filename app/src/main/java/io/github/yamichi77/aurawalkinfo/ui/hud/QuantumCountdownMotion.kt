@@ -10,9 +10,9 @@ internal const val COUNTDOWN_SECOND_MILLIS = 1_000f
 internal const val COUNTDOWN_RIPPLE_MILLIS = 300
 
 // Coordinates are centered on the glyph, in units of its height.
-internal data class CountdownPoint(val x: Float, val y: Float)
+internal data class QuantumPoint(val x: Float, val y: Float)
 
-internal class CountdownParticle(target: CountdownPoint, random: Random) {
+internal class QuantumParticle(target: QuantumPoint, random: Random) {
     private val angle = random.nextFloat() * (2 * PI).toFloat()
     private val cloudRadius = 0.25f + 0.63f * random.nextFloat()
     private val cloudX = cloudRadius * cos(angle)
@@ -24,25 +24,40 @@ internal class CountdownParticle(target: CountdownPoint, random: Random) {
     val targetY = target.y
     val radiusDp = 1f + random.nextFloat()
 
-    fun x(frame: QuantumCountdownFrame): Float = coordinate(
+    fun x(frame: QuantumParticleFrame): Float = coordinate(
         targetX, cloudX, 0.003f * sin(frame.jitterPhase + phase), frame,
     )
 
-    fun y(frame: QuantumCountdownFrame): Float = coordinate(
+    fun y(frame: QuantumParticleFrame): Float = coordinate(
         targetY, cloudY, 0.003f * cos(frame.jitterPhase + phase), frame,
     )
 
     private fun coordinate(
-        target: Float, cloud: Float, jitter: Float, frame: QuantumCountdownFrame,
+        target: Float, cloud: Float, jitter: Float, frame: QuantumParticleFrame,
     ): Float = cloud + (target + jitter - cloud) * frame.convergence + target * drift * frame.dispersal
 }
 
-internal class QuantumCountdownFrame(elapsedMillis: Float) {
+internal open class QuantumParticleFrame(
+    val convergence: Float,
+    val dispersal: Float,
+    val jitterPhase: Float,
+)
+
+internal fun quantumConvergence(progress: Float): Float {
+    val t = progress.coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+internal typealias CountdownPoint = QuantumPoint
+internal typealias CountdownParticle = QuantumParticle
+
+internal class QuantumCountdownFrame(elapsedMillis: Float) : QuantumParticleFrame(
+    convergence = quantumConvergence(elapsedMillis / 400f),
+    dispersal = ((elapsedMillis.coerceIn(0f, COUNTDOWN_SECOND_MILLIS) - 800f) / 200f).coerceAtLeast(0f),
+    jitterPhase = elapsedMillis.coerceIn(0f, COUNTDOWN_SECOND_MILLIS) * 0.024f,
+) {
     private val elapsed = elapsedMillis.coerceIn(0f, COUNTDOWN_SECOND_MILLIS)
     private val gathering = (elapsed / 400f).coerceAtMost(1f)
-    val convergence = gathering * gathering * (3f - 2f * gathering)
-    val dispersal = ((elapsed - 800f) / 200f).coerceAtLeast(0f)
-    val jitterPhase = elapsed * 0.024f
     val particleAlpha = (0.25f + 0.65f * convergence) * (1f - dispersal)
     val correctOutlineAlpha = (0.22f + 0.58f * convergence) * (1f - dispersal)
     val otherOutlineAlpha = 0.26f * (1f - gathering)

@@ -36,6 +36,7 @@ import io.github.yamichi77.aurawalkinfo.session.SessionStartMode
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapControl
+import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
@@ -48,6 +49,7 @@ internal const val DEBUG_TAP_ACTION = "io.github.yamichi77.aurawalkinfo.DEBUG_TA
 
 internal class HudControls : ViewModel() {
     var initialized = false
+    val quantumStartup = HudQuantumStartup()
     var phase by mutableStateOf<WalkPhase>(WalkPhase.Standby)
     var startingFromSummary by mutableStateOf(false)
     var map by mutableStateOf(BigMapControl())
@@ -143,10 +145,16 @@ class MainActivity : ComponentActivity() {
                     }
                     if (spatial) {
                         if (headTrackingGranted) {
-                            HudScene(spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen, onTap)
+                            HudScene(
+                                spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
+                                controls.quantumStartup, onTap,
+                            )
                         }
                     } else {
-                        PhoneScreen(spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen, onTap)
+                        PhoneScreen(
+                            spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
+                            quantumStartup = controls.quantumStartup, onTap = onTap,
+                        )
                     }
                 }
             }

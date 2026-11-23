@@ -21,27 +21,33 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
+import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 
 internal data class Countdown(val label: String, val seconds: Int, val phase: WalkPhase)
 internal data class CountdownPresentation(
     val content: Countdown,
-    val artwork: CountdownArtwork,
+    val artwork: CountdownArtwork?,
     val opacity: Float,
     val active: Boolean,
     val finished: Boolean,
 )
 
 @Composable
-internal fun rememberCountdownPresentation(spec: HudVisualSpec): CountdownPresentation? {
+internal fun rememberCountdownPresentation(
+    spec: HudVisualSpec,
+    quantumEnabled: Boolean = QuantumEffectsEnabled,
+): CountdownPresentation? {
     // A hidden or fast HUD removes the panel immediately, even mid-fade.
     if (spec !is HudVisualSpec.Clusters || spec.showSafetyNotice) return null
-    val artwork = remember { CountdownArtwork() }
+    val artwork = if (quantumEnabled) remember { CountdownArtwork() } else null
     val label = when (spec.phase) {
         is WalkPhase.Starting -> "開始"
         is WalkPhase.Ending -> "終了"
@@ -50,7 +56,7 @@ internal fun rememberCountdownPresentation(spec: HudVisualSpec): CountdownPresen
     val countdown = label?.let { Countdown(it, spec.countdown ?: 3, spec.phase) }
     var lastCountdown by remember { mutableStateOf<Countdown?>(null) }
     if (countdown != null) SideEffect { lastCountdown = countdown }
-    val finished = countdown == null && lastCountdown?.phase?.advance(SystemClock.elapsedRealtime()) == spec.phase
+    val finished = quantumEnabled && countdown == null && lastCountdown?.phase?.advance(SystemClock.elapsedRealtime()) == spec.phase
     val visibility = remember { MutableTransitionState(false) }
     visibility.targetState = countdown != null
     val opacity by rememberTransition(visibility).animateFloat(transitionSpec = {
@@ -74,7 +80,7 @@ internal fun CountdownPanel(
     val artworkSize = Modifier.size(digitHeight * 1.92f)
     if (presentation.finished) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            CountdownRipple(1f - presentation.opacity, artworkSize)
+            CountdownRipple(1f - presentation.opacity, artworkSize.testTag("countdown-ripple"))
         }
         return
     }
@@ -92,10 +98,18 @@ internal fun CountdownPanel(
             HudLabel(presentation.content.label, titleSize, HudDetail)
         }
         val digit = presentation.content.seconds
-        QuantumCountdownDigit(
-            presentation.artwork, digit, checkNotNull(presentation.content.phase.deadline), presentation.active,
-            digitHeight, artworkSize.semantics { contentDescription = digit.toString() },
-        )
+        val artwork = presentation.artwork
+        if (artwork != null) {
+            QuantumCountdownDigit(
+                artwork, digit, checkNotNull(presentation.content.phase.deadline), presentation.active,
+                digitHeight, artworkSize.semantics { contentDescription = digit.toString() },
+            )
+        } else {
+            val digitSize = with(LocalDensity.current) { (digitHeight / 0.72f).toSp().value }
+            Box(artworkSize, contentAlignment = Alignment.Center) {
+                HudLabel(digit.toString(), digitSize, HudText, weight = FontWeight.Medium)
+            }
+        }
         Box(labelSlot, contentAlignment = Alignment.Center) {
             HudLabel("タップでキャンセル", hintSize, HudDetail)
         }

@@ -12,11 +12,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -43,6 +47,7 @@ internal fun StatsPanel(
     textScale: Float,
     modifier: Modifier = Modifier,
     onNoticeTimeout: () -> Unit = {},
+    quantum: QuantumAnimation? = null,
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.TopStart) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
@@ -69,36 +74,48 @@ internal fun StatsPanel(
             locationDenied -> HudLabel("位置の権限がありません", 14 * textScale, HudText, widthPx = widthPx)
             spec is HudVisualSpec.Clusters -> {
                 val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
+                val startup = quantum?.takeIf { it.effect == QuantumEffect.Startup }
+                val effectTag = if (quantum?.drawing == true) Modifier.testTag("quantum-left") else Modifier
                 Column(
-                    Modifier.alpha(opacity),
+                    Modifier.alpha(opacity).then(effectTag),
                     // Japanese fallback fonts reserve extra interline space even for single-line text.
                     verticalArrangement = Arrangement.spacedBy((-4 * textScale).dp),
                 ) {
                     if (spec.leftPhase == WalkPhase.Standby) {
-                        HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx)
-                        HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx)
+                        HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx,
+                            quantum = startup, particles = 20)
+                        HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx,
+                            quantum = startup, particles = 12)
                         return@Column
                     }
                     val summary = spec.leftPhase == WalkPhase.Summary
-                    if (summary) HudLabel("おつかれさま", 14 * textScale, HudDetail, widthPx = widthPx)
+                    if (summary) HudLabel("おつかれさま", 14 * textScale, HudDetail, widthPx = widthPx,
+                        quantum = quantum, particles = 10)
                     Row {
                         HudLabel(
                             spec.distance.number, 32 * textScale, spec.distanceColor,
                             Modifier.alignByBaseline(), weight = FontWeight.Medium,
+                            quantum = quantum, particles = 18,
                         )
                         Spacer(Modifier.width((3 * textScale).dp))
                         HudLabel(
                             spec.distance.unit, 16 * textScale, spec.distanceColor,
                             Modifier.alignByBaseline(), weight = FontWeight.Medium,
+                            quantum = quantum, particles = 6,
                         )
                     }
-                    HudLabel(spec.walkingTime, 16 * textScale, HudText)
-                    spec.detail?.let { HudLabel(it, 14 * textScale, HudDetail, widthPx = widthPx) }
+                    HudLabel(spec.walkingTime, 16 * textScale, HudText, quantum = quantum, particles = 12)
+                    spec.detail?.let {
+                        HudLabel(it, 14 * textScale, HudDetail, widthPx = widthPx,
+                            quantum = if (summary) quantum else startup, particles = 8)
+                    }
                     if (summary) {
-                        HudLabel("タップで新しく開始", 14 * textScale, HudDetail, widthPx = widthPx)
+                        val hint = if (quantum == null) Modifier else Modifier.graphicsLayer { alpha = quantum.contentAlpha }
+                        HudLabel("タップで新しく開始", 14 * textScale, HudDetail, hint, widthPx = widthPx)
                     } else {
                         spec.address.lineSequence().take(spec.addressLines).forEach {
-                            HudLabel(it, 14 * textScale, spec.addressColor, widthPx = widthPx)
+                            HudLabel(it, 14 * textScale, spec.addressColor, widthPx = widthPx,
+                                quantum = startup, particles = 6)
                         }
                     }
                 }
@@ -115,6 +132,8 @@ internal fun HudLabel(
     modifier: Modifier = Modifier,
     weight: FontWeight = FontWeight.Normal,
     widthPx: Float = Float.POSITIVE_INFINITY,
+    quantum: QuantumAnimation? = null,
+    particles: Int = 0,
 ) {
     val style = TextStyle(
         fontSize = size.sp,
@@ -130,9 +149,14 @@ internal fun HudLabel(
     } else {
         1f
     }
+    val baseline = if (quantum != null) remember { mutableFloatStateOf(0f) } else null
+    val reveal = if (quantum != null && baseline != null) {
+        quantumLabelModifier(quantum, text, size, weight, scaleX, particles) { baseline.floatValue }
+    } else Modifier
     Text(
         text = text,
-        modifier = modifier,
+        modifier = modifier.then(reveal),
+        onTextLayout = { if (baseline != null) baseline.floatValue = it.firstBaseline },
         color = color,
         style = style.copy(textGeometricTransform = TextGeometricTransform(scaleX = scaleX)),
         maxLines = 1,

@@ -70,11 +70,15 @@ internal fun HudScene(
     debug: HudDebugOptions,
     onNoticeTimeout: () -> Unit,
     bigMapOpen: Boolean,
+    quantumStartup: HudQuantumStartup,
     onTap: (HudTarget) -> Unit,
 ) {
     val session = LocalSession.current
     if (session == null) {
-        PhoneScreen(spec, locationDenied, debug, onNoticeTimeout, bigMapOpen, onTap)
+        PhoneScreen(
+            spec, locationDenied, debug, onNoticeTimeout, bigMapOpen,
+            quantumStartup = quantumStartup, onTap = onTap,
+        )
         return
     }
     val debugBuild = LocalContext.current.isDebugBuild()
@@ -150,11 +154,14 @@ internal fun HudScene(
         tween(if (hiddenForMotion) HeadMotionGate.HideMillis else HeadMotionGate.ShowMillis),
     ) else null
 
+    var scale by remember(session) { mutableStateOf<Float?>(null) }
+    val ready = configured && tracking && scale != null
+    val countdown = rememberCountdownPresentation(if (ready) spec else HudVisualSpec.Hidden)
+    val quantum = rememberHudQuantum(spec, locationDenied, bigMapOpen, countdown, quantumStartup, ready)
     if (!configured || spec is HudVisualSpec.Hidden) return
     Subspace(follow = FollowTarget.view(FollowMode.tight(TrackedDimensions.All))) {
         // Read the scale applied by Compose XR in the actual following hierarchy.
         var root by remember { mutableStateOf<Entity?>(null) }
-        var scale by remember { mutableStateOf<Float?>(null) }
         LaunchedEffect(root) {
             val entity = root ?: return@LaunchedEffect
             while (true) {
@@ -166,7 +173,8 @@ internal fun HudScene(
                 if (tracking || showRotationFallback) {
                     SpatialHudPanels(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
-                        showRotationFallback, onNoticeTimeout, bigMapOpen, onTap, !HideHudOnHeadMotion || !hiddenForMotion,
+                        showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
+                        !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum,
                     )
                 }
             }
@@ -190,13 +198,18 @@ private fun SpatialHudPanels(
     bigMapOpen: Boolean,
     onTap: (HudTarget) -> Unit,
     inputEnabled: Boolean,
+    countdown: CountdownPresentation?,
+    quantum: HudQuantum,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
     val physicalDpPerMeter = dpPerMeter / scale
     val mapVisible = spec is HudVisualSpec.Clusters && !locationDenied
     val showBigMap = bigMapOpen && mapVisible
-    val bigMapAlpha by animateFloatAsState(if (showBigMap) 1f else 0f, tween(HudAnimationMillis))
+    val bigMapQuantum = quantum.bigMap
+    val bigMapAlpha = if (mapVisible && bigMapQuantum == null) {
+        animateFloatAsState(if (showBigMap) 1f else 0f, tween(HudAnimationMillis)).value
+    } else 1f.takeIf { bigMapQuantum != null } ?: 0f
 
     if (tracking) {
         if (showBigMap && inputEnabled) {
@@ -219,10 +232,10 @@ private fun SpatialHudPanels(
                 Modifier.fillMaxSize().clipToBounds().hudClick(HudTarget.LEFT, onTap, inputEnabled)
                     .capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
                 onNoticeTimeout,
+                quantum.left,
             )
         }
 
-        val countdown = rememberCountdownPresentation(spec)
         if (countdown != null) {
             SpatialPanel(
                 HudPlacement.modifier(HudPlacement.pose(0f, 0f), dpPerMeter, scale)
@@ -237,36 +250,43 @@ private fun SpatialHudPanels(
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
             PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
-                ClickableMap(
-                    spec, debug, HudTarget.MAP, onTap,
-                    Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")), inputEnabled,
-                )
+                QuantumMap(
+                    quantum.miniMap, large = false,
+                    Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),
+                ) { mapModifier ->
+                    ClickableMap(spec, debug, HudTarget.MAP, onTap, mapModifier, inputEnabled)
+                }
             }
         } else if (debug.capture && spec is HudVisualSpec.Fast) {
             PlacedPanel(session, HudPanel.RIGHT, 0.1f, 0.1f, dpPerMeter, scale, null, motionOpacity) {
                 Box(Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")))
             }
         }
-        if (spec is HudVisualSpec.Clusters && !locationDenied && (showBigMap || bigMapAlpha > 0f)) {
+        if (spec is HudVisualSpec.Clusters && !locationDenied &&
+            (showBigMap || bigMapAlpha > 0f || bigMapQuantum != null)
+        ) {
             val size = HudPlacement.bigMapSizeMeters
             PlacedPanel(
-                session, HudPanel.BIGMAP, size, size, dpPerMeter, scale, check, motionOpacity * bigMapAlpha,
+                session, HudPanel.BIGMAP, size, size, dpPerMeter, scale, check,
+                motionOpacity * bigMapAlpha,
             ) {
-                ClickableMap(
-                    spec, debug, HudTarget.BIGMAP, onTap, Modifier.fillMaxSize(), showBigMap && inputEnabled,
-                    bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * physicalDpPerMeter).dp,
-                )
+                QuantumMap(bigMapQuantum, large = true, Modifier.fillMaxSize()) { mapModifier ->
+                    ClickableMap(
+                        spec, debug, HudTarget.BIGMAP, onTap, mapModifier, showBigMap && inputEnabled,
+                        bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * physicalDpPerMeter).dp,
+                    )
+                }
             }
         }
     }
 
-    if (debug.grid && !showBigMap && (tracking || showRotationFallback)) {
+    if (spec !is HudVisualSpec.Fast && debug.grid && !showBigMap && (tracking || showRotationFallback)) {
         PlacedPanel(session, HudPanel.GRID, gridWidthMeters, gridHeightMeters, dpPerMeter, scale, check) {
             DebugAngleGrid(Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "grid")))
         }
     }
 
-    if (showRotationFallback) {
+    if (spec !is HudVisualSpec.Fast && showRotationFallback) {
         for ((index, pitch) in listOf(2f, -2f).withIndex()) {
             val pose = HudPlacement.pose(Layout.leftYaw, pitch)
             val facing = if (index == 0) pose.rotation else HudPlacement.rotation(-Layout.leftYaw, pitch)
