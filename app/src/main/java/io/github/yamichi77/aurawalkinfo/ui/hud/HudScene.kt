@@ -51,6 +51,7 @@ import androidx.xr.scenecore.scene
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPanel
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPlacementCheck
+import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
@@ -76,7 +77,9 @@ internal fun HudScene(
     wallClock: WallClock,
     bigMapMode: BigMapMode,
     onTap: (HudTarget) -> Unit,
-    headingTracking: HeadingTracking? = null,
+    skyBandSettings: SkyBandSettings,
+    headingTracking: HeadingTracking,
+    skyBandTargets: SkyBandTargets,
 ) {
     val session = LocalSession.current
     if (session == null) {
@@ -175,6 +178,12 @@ internal fun HudScene(
         }
         SceneCoreEntity(factory = { Entity.create(session, "Aura HUD") }, update = { root = it }) {
             scale?.let {
+                val dpPerMeter = session.scene.virtualPixelDensity.convertMetersToPixels(1f) /
+                    LocalDensity.current.density
+                SpatialSkyBand(
+                    session, skyBandTargets, skyBandSettings, headingTracking, tracking, spec is HudVisualSpec.Fast,
+                    dpPerMeter, it, debugBuild, debug.selfCheck,
+                )
                 if (tracking || showRotationFallback) {
                     SpatialHudPanels(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,

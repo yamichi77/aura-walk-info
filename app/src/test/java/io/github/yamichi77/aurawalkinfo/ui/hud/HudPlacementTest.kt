@@ -12,6 +12,19 @@ import kotlin.math.sin
 
 class HudPlacementTest {
     @Test
+    fun everySkyMarkPanelFitsTheUpperBandAtBothEdgesAndInTheCenter() {
+        for (kind in SkyMarkKind.entries) {
+            val layout = skyMarkLayout(kind)
+            for (yaw in listOf(-28f, 0f, 28f)) {
+                val pose = HudPlacement.pose(yaw, layout.pitch)
+                val bounds = skyPitchBounds(pose, layout.widthMeters, layout.heightMeters)
+                assertTrue("$kind at $yaw: $bounds", bounds.insideBand)
+                assertEquals(if (kind == SkyMarkKind.DISTANCE) 15f else 17.5f, layout.pitch, 0f)
+            }
+        }
+    }
+
+    @Test
     fun bigMapArrowMatchesWalkingMiniMapAngularHeight() {
         val miniMap = HudPlacement.pose(Layout.rightYaw, Layout.pitch)
         val bigMap = HudPlacement.pose(0f, HudPlacement.bigMapPitch)

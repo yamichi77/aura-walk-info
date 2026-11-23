@@ -6,7 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
-all_checks=$default_checks,ble,pics,map3d,heading,speech,nav
+all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -573,14 +573,18 @@ check_state() {
 }
 
 wait_for_safety_log() {
-    local pattern=$1 deadline=$((SECONDS + $2))
+    local pattern=$1 deadline=$((SECONDS + $2)) after=${3:-} entries
     local pid
     pid=$(adb_retry shell pidof -s "$pkg" | tr -d '\r')
     [[ $pid =~ ^[0-9]+$ ]] || return 1
     run_log=
     while (( SECONDS < deadline )); do
-        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav) || return 1
-        if grep -Eq "$pattern" <<< "$run_log"; then return 0; fi
+        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav AuraSky AuraPlacement) || return 1
+        entries=$run_log
+        if [[ -n $after ]]; then
+            entries=$(awk -v after="$after" 'seen; $0 ~ after { seen = 1 }' <<< "$run_log")
+        fi
+        if grep -Eq "$pattern" <<< "$entries"; then return 0; fi
         sleep 0.25
     done
     return 1
@@ -602,6 +606,80 @@ check_nav() {
     printf '%s\n' "$run_log" >> "$log"
     adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es action cancel >> "$log" || true
     replay_scenario stop || true
+}
+
+sky_settings() {
+    adb_retry shell am broadcast -a "$pkg.SETTINGS" -p "$pkg" "$@" >> "$log"
+}
+
+# Calibrate the fixed estimate against the currently tracked head. No walking is needed.
+sky_align_north() {
+    sky_settings --ef north_offset 0 --ef north_uncertainty 16 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: UNCERTAIN .*rawHead=[0-9.]+ uncertainty=16\.00' 5 || return 1
+    sky_offset=$(awk -F'rawHead=' '/AuraSky.*UNCERTAIN/ && $2 ~ /^[0-9]/ { angle = -($2 + 0); found = 1 }
+        END { if (!found) exit 1; printf "%.2f", angle }' <<< "$run_log") || return 1
+    sky_settings --ef north_offset "$sky_offset" --ef north_uncertainty 5
+}
+
+check_skyband() {
+    local original sky_offset
+    run_log=
+    start_run skyband-nav -W --es startMode auto --ez selfcheck true || return 0
+    if ! wait_for_safety_log 'AuraSky[[:space:]]*: SETTINGS ready enabled=(true|false)' 5; then
+        record FAIL 'skyband 設定受信の開始'
+        return 0
+    fi
+    original=$(sed -n 's/.*AuraSky[[:space:]]*: SETTINGS ready enabled=\(true\|false\).*/\1/p' <<< "$run_log" | tail -n 1)
+    if sky_settings --ez sky_band true &&
+        adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es scenario synthetic >> "$log" &&
+        replay_scenario navigation &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: NO_ESTIMATE .*marks=-' 5 &&
+        sky_align_north &&
+        wait_for_safety_log 'AuraPlacement[[:space:]]*: SKYBAND PASS mark=DISTANCE ' 8 &&
+        grep -Eq 'AuraSky[[:space:]]*: SHOW .*marks=TURN:.*DISTANCE:' <<< "$run_log" &&
+        grep -Eq 'AuraPlacement[[:space:]]*: SKYBAND PASS mark=TURN ' <<< "$run_log" &&
+        sky_settings --ef north_offset "$sky_offset" --ef north_uncertainty 20 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: UNCERTAIN .*uncertainty=20\.00 marks=-' 5 &&
+        sky_settings --ef north_offset "$sky_offset" --ef north_uncertainty 5 --ez sky_band false &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: DISABLED .*marks=-' 5 &&
+        sky_settings --ez sky_band true --ez clear_north true &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: NO_ESTIMATE .*marks=-' 5 'AuraSky.*DISABLED ' &&
+        sky_settings --ef north_offset "$sky_offset" --ef north_uncertainty 6 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: SHOW .*uncertainty=6\.00 marks=TURN:' 5 &&
+        sky_settings --ez sky_tracking_lost true &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: TRACKING_LOST .*marks=-' 5 'AuraSky.*SHOW .*uncertainty=6' &&
+        sky_settings --ez sky_tracking_lost false --ef north_offset "$sky_offset" --ef north_uncertainty 7 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: SHOW .*uncertainty=7\.00 marks=TURN:' 5 &&
+        replay_scenario fast --ef speed 4 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: FAST .*marks=-' 15 &&
+        ! grep -Eq 'AuraPlacement[[:space:]]*: SKYBAND FAIL ' <<< "$run_log"; then
+        record PASS 'skyband 曲がり角・距離・北推定・設定・追跡喪失（模擬）・高速移動'
+    else
+        record FAIL 'skyband 曲がり角・距離・北推定・設定・追跡喪失（模擬）・高速移動'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es action cancel >> "$log" || true
+    replay_scenario stop || true
+
+    run_log=
+    if start_run skyband-pics -W --es fakeState stopped --ez selfcheck true &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: SETTINGS ready' 5 &&
+        sky_settings --ez sky_band true &&
+        wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5 &&
+        pics_scenario red_to_green &&
+        sky_align_north &&
+        wait_for_safety_log 'AuraPlacement[[:space:]]*: SKYBAND PASS mark=SIGNAL ' 5 &&
+        grep -Eq 'AuraSky[[:space:]]*: SHOW .*marks=SIGNAL:' <<< "$run_log" &&
+        wait_for_safety_log 'AuraPics[[:space:]]*: PICS scenario=red_to_green phase=HIDDEN' 8 &&
+        wait_for_safety_log 'AuraSky[[:space:]]*: NO_TARGETS ' 5 'AuraSky.*SHOW .*marks=SIGNAL:' &&
+        ! grep -Eq 'AuraPlacement[[:space:]]*: SKYBAND FAIL ' <<< "$run_log"; then
+        record PASS 'skyband 交差点と受信途絶後の消去'
+    else
+        record FAIL 'skyband 交差点と受信途絶後の消去'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    pics_scenario stop || record FAIL 'skyband PICS 再生停止'
+    sky_settings --ez sky_band "$original" --ez clear_north true || record FAIL 'skyband 元の設定に復元'
 }
 
 check_t15_probe() {
@@ -797,7 +875,8 @@ main() {
         if selected headmotion; then record SKIP 'headmotion（装着が必要）'; fi
         if selected input; then record SKIP 'input（装着が必要）'; fi
         if selected bigmap; then record SKIP 'bigmap（装着が必要）'; fi
-        if [[ $only =~ ^(placement|headmotion|input|bigmap)(,(placement|headmotion|input|bigmap))*$ ]]; then
+        if selected skyband; then record SKIP 'skyband（装着が必要）'; fi
+        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband)(,(placement|headmotion|input|bigmap|skyband))*$ ]]; then
             printf '%s\n' "${results[@]}"
             return 0
         fi
@@ -827,6 +906,7 @@ main() {
     if selected heading; then check_t15_probe heading; fi
     if selected speech; then check_t15_probe speech; fi
     if selected nav; then check_nav; fi
+    if ! $preview && selected skyband; then check_skyband; fi
     summary
     return "$failed"
 }
