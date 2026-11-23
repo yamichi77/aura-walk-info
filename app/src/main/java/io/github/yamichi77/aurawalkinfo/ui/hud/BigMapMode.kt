@@ -14,7 +14,7 @@ internal enum class BigMapMode(
     val toggleLabel: String,
 ) {
     FLAT(16.5f, 0f, false, R.raw.map_style_dark_bigmap, "3D"),
-    TILTED(17.5f, 60f, true, R.raw.map_style_dark_bigmap_3d, "2D");
+    TILTED(18f, 60f, true, R.raw.map_style_dark_bigmap_3d, "2D");
 
     fun cameraPosition(center: MapCenter) =
         CameraPosition(LatLng(center.latitude, center.longitude), zoom, tilt, 0f)

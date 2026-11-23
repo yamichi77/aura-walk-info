@@ -160,7 +160,7 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
         fun line(x: Float, y: Float) = point(x, y).let { lineTo(it.x, it.y) }
         when (label) {
             "目的地" -> {
-                // A map pin: a round head whose tangents meet at the tip, with a hole in the head.
+                // A map pin: a round head whose tangents meet at the tip. The head dot is drawn below.
                 val headY = -0.35f
                 val headRadius = 0.8f
                 val tipY = 1.25f
@@ -173,7 +173,6 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
                     90f - tangentDegrees, 2 * tangentDegrees - 360f, false,
                 )
                 close()
-                addOval(Rect(point(-0.3f, headY - 0.3f), point(0.3f, headY + 0.3f)))
             }
             "3D" -> {
                 move(0f, -1f)
@@ -200,6 +199,7 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
     }
     drawPath(outline, HudText, alpha = alpha, style = stroke)
     if (label == "目的地") {
-        drawCircle(HudText, extent * 0.29f, point(0f, -0.6f), alpha, stroke)
+        // A small dot at the head center instead of a ring, so the pin does not read as a double circle.
+        drawCircle(HudText, extent * 0.18f, point(0f, -0.35f), alpha)
     }
 }

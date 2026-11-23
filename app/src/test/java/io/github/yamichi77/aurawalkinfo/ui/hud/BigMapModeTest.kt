@@ -20,7 +20,7 @@ class BigMapModeTest {
         val tilted = BigMapMode.TILTED.cameraPosition(center)
         assertEquals(16.5f, flat.zoom, 0f)
         assertEquals(0f, flat.tilt, 0f)
-        assertEquals(17.5f, tilted.zoom, 0f)
+        assertEquals(18f, tilted.zoom, 0f)
         assertEquals(60f, tilted.tilt, 0f)
         for (position in listOf(flat, tilted)) {
             assertEquals(0f, position.bearing, 0f)

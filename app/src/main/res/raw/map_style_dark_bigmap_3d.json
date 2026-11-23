@@ -13,6 +13,5 @@
   { "featureType": "road.arterial", "elementType": "geometry", "stylers": [{ "color": "#808080" }] },
   { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#808080" }] },
   { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0B1A2E" }] },
-  { "featureType": "landscape.man_made", "elementType": "geometry.fill", "stylers": [{ "color": "#000000" }] },
-  { "featureType": "landscape.man_made", "elementType": "geometry.stroke", "stylers": [{ "color": "#7A98A8" }] }
+  { "featureType": "landscape.man_made", "elementType": "geometry.fill", "stylers": [{ "color": "#262626" }] }
 ]

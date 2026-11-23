@@ -25,7 +25,7 @@ class MapStyleTest {
     }
 
     @Test
-    fun tiltedMapShowsOnlyStationLabelsAndDrawsBuildingsAsDarkOutlines() {
+    fun tiltedMapShowsOnlyStationLabelsAndFillsBuildingsDimGray() {
         val flat = loadRules(R.raw.map_style_dark_bigmap)
         val tilted = loadRules(R.raw.map_style_dark_bigmap_3d)
         for (element in listOf("labels.icon", "labels.text")) {
@@ -35,14 +35,13 @@ class MapStyleTest {
             assertEquals("on", tilted.style("transit.station", element, "visibility"))
             assertEquals("on", tilted.style("transit.station.rail", element, "visibility"))
         }
-        // The legacy style cannot separate buildings from built-up ground, so a fill lights the whole
-        // ground on the additive display. Keep the fill black and draw only outlines (T20 on AURA).
-        assertEquals("#000000", tilted.style("landscape.man_made", "geometry.fill", "color"))
-        val stroke = tilted.style("landscape.man_made", "geometry.stroke", "color")
-        assertEquals("#7A98A8", stroke)
-        // Thin outlines read darker than filled road ribbons, so they may be a little brighter than
-        // the thick roads, but stay well below the HUD text color #E0F7FF.
-        assertTrue(luminance(requireNotNull(stroke)) < luminance("#E0F7FF") * 0.7)
+        // The legacy style cannot separate buildings from built-up ground, and 3D buildings ignore
+        // strokes. A dim gray fill shows the buildings while the ground glows only faintly (T20 on AURA).
+        val fill = tilted.style("landscape.man_made", "geometry.fill", "color")
+        assertEquals("#262626", fill)
+        // No separate outline rule: the stroke falls back to the black base geometry.
+        assertEquals("#000000", tilted.style("landscape.man_made", "geometry.stroke", "color"))
+        assertTrue(luminance(requireNotNull(fill)) < luminance("#808080") / 2)
     }
 
     private fun luminance(hex: String): Double {
