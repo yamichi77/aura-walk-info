@@ -49,6 +49,7 @@ internal const val DEBUG_TAP_ACTION = "io.github.yamichi77.aurawalkinfo.DEBUG_TA
 internal class HudControls : ViewModel() {
     var initialized = false
     var phase by mutableStateOf<WalkPhase>(WalkPhase.Standby)
+    var startingFromSummary by mutableStateOf(false)
     var map by mutableStateOf(BigMapControl())
     var seconds by mutableStateOf<Int?>(null)
 }
@@ -125,6 +126,7 @@ class MainActivity : ComponentActivity() {
                     val spec = hudVisualSpecFor(
                         debug.fakeState ?: state, noticePending = visibility.noticePending,
                         phase = controls.phase, countdown = controls.seconds,
+                        startingFromSummary = controls.startingFromSummary,
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
                     val denied = !locationGranted && debug.fakeState == null
@@ -209,13 +211,18 @@ class MainActivity : ComponentActivity() {
         val motion = currentMotion()
         advanceControls(now, motion)
         val hit = if (target == HudTarget.LEFT && controls.map.isOpen) HudTarget.OUTSIDE else target
-        val suffix = if (motion == MotionState.FAST) " ignored-fast" else ""
+        val countingDown = controls.phase.deadline != null
+        val suffix = when {
+            motion == MotionState.FAST -> " ignored-fast"
+            hit == HudTarget.MAP && countingDown -> " ignored-countdown"
+            else -> ""
+        }
         Log.i("AuraInput", "CLICK target=${hit.name.lowercase()} source=$source$suffix")
-        if (motion != MotionState.FAST) {
+        if (suffix.isEmpty()) {
             if (visibility.noticePending) {
                 visibility.dismissNotice()
                 if (isDebugBuild()) Log.i("AuraHud", "notice dismissed by tap")
-            } else if (hit == HudTarget.LEFT) {
+            } else if (hit == HudTarget.LEFT || hit == HudTarget.COUNTDOWN && countingDown) {
                 setPhase(controls.phase.tap(now, motion))
             } else {
                 setMap(controls.map.tap(hit, now, motion), now, "tap")
@@ -239,6 +246,7 @@ class MainActivity : ComponentActivity() {
     private fun setPhase(phase: WalkPhase) {
         val previous = controls.phase
         if (phase == previous) return
+        controls.startingFromSummary = phase is WalkPhase.Starting && previous == WalkPhase.Summary
         controls.phase = phase
         if (fakeMotion == null) {
             if (phase == WalkPhase.Measuring && previous is WalkPhase.Starting) {

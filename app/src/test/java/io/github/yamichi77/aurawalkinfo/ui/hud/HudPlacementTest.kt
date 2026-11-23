@@ -12,6 +12,17 @@ import kotlin.math.sin
 
 class HudPlacementTest {
     @Test
+    fun bigMapArrowMatchesWalkingMiniMapAngularHeight() {
+        val miniMap = HudPlacement.pose(Layout.rightYaw, Layout.pitch)
+        val bigMap = HudPlacement.pose(0f, HudPlacement.bigMapPitch)
+        val miniArrow = mapArrowHeight(HudPlacement.mapSizeMeters(Layout.walkingDiameter))
+        val miniAngle = 2 * atan2(miniArrow / 2, miniMap.translation.length)
+        val bigAngle = 2 * atan2(HudPlacement.bigMapArrowHeightMeters / 2, bigMap.translation.length)
+        assertEquals(miniAngle, bigAngle, 0.0001f)
+        assertTrue(HudPlacement.bigMapArrowHeightMeters < mapArrowHeight(HudPlacement.bigMapSizeMeters))
+    }
+
+    @Test
     fun leftPanelIsOnSphereAndFacesHead() {
         val pose = HudPlacement.pose(-22f, -8f)
         assertEquals(-0.55644f, pose.translation.x, 0.0001f)

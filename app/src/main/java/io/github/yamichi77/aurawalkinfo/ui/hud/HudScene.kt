@@ -222,6 +222,17 @@ private fun SpatialHudPanels(
             )
         }
 
+        val countdown = rememberCountdownPresentation(spec)
+        if (countdown != null) {
+            SpatialPanel(
+                HudPlacement.modifier(HudPlacement.pose(0f, 0f), dpPerMeter, scale)
+                    .width((HudPlacement.countdownWidthMeters * physicalDpPerMeter).dp)
+                    .height((HudPlacement.countdownHeightMeters * physicalDpPerMeter).dp)
+                    .alpha(motionOpacity),
+            ) {
+                CountdownPanel(countdown, physicalDpPerMeter, onTap, Modifier.fillMaxSize(), inputEnabled)
+            }
+        }
         if (spec is HudVisualSpec.Clusters && !locationDenied && !showBigMap) {
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
@@ -241,7 +252,10 @@ private fun SpatialHudPanels(
             PlacedPanel(
                 session, HudPanel.BIGMAP, size, size, dpPerMeter, scale, check, motionOpacity * bigMapAlpha,
             ) {
-                ClickableMap(spec, debug, HudTarget.BIGMAP, onTap, Modifier.fillMaxSize(), showBigMap && inputEnabled)
+                ClickableMap(
+                    spec, debug, HudTarget.BIGMAP, onTap, Modifier.fillMaxSize(), showBigMap && inputEnabled,
+                    bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * physicalDpPerMeter).dp,
+                )
             }
         }
     }

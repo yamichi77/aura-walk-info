@@ -74,22 +74,13 @@ internal fun StatsPanel(
                     // Japanese fallback fonts reserve extra interline space even for single-line text.
                     verticalArrangement = Arrangement.spacedBy((-4 * textScale).dp),
                 ) {
-                    when (spec.phase) {
-                        WalkPhase.Standby -> {
-                            HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx)
-                            HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx)
-                            return@Column
-                        }
-                        is WalkPhase.Starting, is WalkPhase.Ending -> {
-                            val seconds = spec.countdown ?: 3
-                            val label = if (spec.phase is WalkPhase.Ending) "終了 $seconds" else "$seconds"
-                            HudLabel(label, 32 * textScale, HudText, widthPx = widthPx)
-                            HudLabel("タップでキャンセル", 14 * textScale, HudDetail, widthPx = widthPx)
-                            return@Column
-                        }
-                        WalkPhase.Summary -> HudLabel("おつかれさま", 14 * textScale, HudDetail, widthPx = widthPx)
-                        WalkPhase.Measuring -> Unit
+                    if (spec.leftPhase == WalkPhase.Standby) {
+                        HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx)
+                        HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx)
+                        return@Column
                     }
+                    val summary = spec.leftPhase == WalkPhase.Summary
+                    if (summary) HudLabel("おつかれさま", 14 * textScale, HudDetail, widthPx = widthPx)
                     Row {
                         HudLabel(
                             spec.distance.number, 32 * textScale, spec.distanceColor,
@@ -103,7 +94,7 @@ internal fun StatsPanel(
                     }
                     HudLabel(spec.walkingTime, 16 * textScale, HudText)
                     spec.detail?.let { HudLabel(it, 14 * textScale, HudDetail, widthPx = widthPx) }
-                    if (spec.phase == WalkPhase.Summary) {
+                    if (summary) {
                         HudLabel("タップで新しく開始", 14 * textScale, HudDetail, widthPx = widthPx)
                     } else {
                         spec.address.lineSequence().take(spec.addressLines).forEach {
@@ -117,7 +108,7 @@ internal fun StatsPanel(
 }
 
 @Composable
-private fun HudLabel(
+internal fun HudLabel(
     text: String,
     size: Float,
     color: Color,

@@ -27,6 +27,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.hud.DebugAngleGrid
 import io.github.yamichi77.aurawalkinfo.ui.hud.ClickableMap
+import io.github.yamichi77.aurawalkinfo.ui.hud.CountdownPanel
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudPlacement
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudAnimationMillis
@@ -35,6 +36,7 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.StatsPanel
 import io.github.yamichi77.aurawalkinfo.ui.hud.gridHeightMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.gridWidthMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudClick
+import io.github.yamichi77.aurawalkinfo.ui.hud.rememberCountdownPresentation
 
 @Composable
 internal fun PhoneScreen(
@@ -94,6 +96,16 @@ internal fun PhoneScreen(
                 spec, debug, HudTarget.BIGMAP, onTap,
                 Modifier.align(Alignment.Center).size(minOf(maxWidth, maxHeight) * 0.85f).alpha(bigMapAlpha),
                 enabled = showBigMap,
+                bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * dpPerMeter).dp,
+            )
+        }
+        rememberCountdownPresentation(spec)?.let { countdown ->
+            CountdownPanel(
+                countdown, dpPerMeter, onTap,
+                Modifier.align(Alignment.Center).size(
+                    (HudPlacement.countdownWidthMeters * dpPerMeter).dp,
+                    (HudPlacement.countdownHeightMeters * dpPerMeter).dp,
+                ),
             )
         }
     }

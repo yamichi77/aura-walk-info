@@ -164,9 +164,9 @@ check_input() {
     local target prompt logs prior=0 size
     for target in left map outside; do
         case "$target" in
-            left) prompt='ポインターを左の数字に合わせてタップしてください' ;;
-            map) prompt='次に右下の地図をタップしてください' ;;
-            outside) prompt='大きい地図の外をタップしてください' ;;
+            left) prompt='手を伸ばして、左の表示をつまんでください' ;;
+            map) prompt='次に右下の地図をつまんでください' ;;
+            outside) prompt='大きい地図の外をつまんでください' ;;
         esac
         echo "$prompt（15秒）"
         sleep 15

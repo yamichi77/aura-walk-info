@@ -8,6 +8,7 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
+import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMapOptions
 import com.google.android.gms.maps.MapView
@@ -90,6 +92,8 @@ internal fun MiniMapPanel(
     debug: HudDebugOptions,
     modifier: Modifier = Modifier,
     zoom: Float = MAP_ZOOM,
+    @RawRes mapStyle: Int = R.raw.map_style_dark,
+    arrowHeight: Dp? = null,
 ) {
     val context = LocalContext.current
     val hasKey = remember(context) { context.hasMapsKey() }
@@ -119,9 +123,10 @@ internal fun MiniMapPanel(
             MiniMapSurface(
                 position, padding, selfCheck, checkSnapshot = selfCheck && debug.fakeState != null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
+                mapStyle = mapStyle,
             )
         }
-        MiniMapPlaceholder(spec, Modifier.fillMaxSize())
+        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight)
     }
 }
 
@@ -133,6 +138,7 @@ internal fun ClickableMap(
     onTap: (HudTarget) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    bigMapArrowHeight: Dp? = null,
 ) {
     Box(modifier) {
         val large = target == HudTarget.BIGMAP
@@ -144,6 +150,8 @@ internal fun ClickableMap(
             debug = if (large) debug.copy(selfCheck = false) else debug,
             modifier = Modifier.matchParentSize(),
             zoom = if (large) 16.5f else MAP_ZOOM,
+            mapStyle = if (large) R.raw.map_style_dark_bigmap else R.raw.map_style_dark,
+            arrowHeight = bigMapArrowHeight,
         )
         Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
     }
@@ -157,14 +165,15 @@ private fun MiniMapSurface(
     selfCheck: Boolean,
     checkSnapshot: Boolean,
     modifier: Modifier,
+    @RawRes mapStyle: Int,
 ) {
     val context = LocalContext.current
-    val properties = remember(context) {
+    val properties = remember(context, mapStyle) {
         MapProperties(
             isBuildingEnabled = false,
             isIndoorEnabled = false,
             isMyLocationEnabled = false,
-            mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, R.raw.map_style_dark),
+            mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, mapStyle),
         )
     }
     val camera = rememberCameraPositionState { this.position = position }

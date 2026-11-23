@@ -45,7 +45,16 @@ internal sealed interface HudVisualSpec {
         val mapOpacity: Float = opacity,
         val phase: WalkPhase = WalkPhase.Measuring,
         val countdown: Int? = null,
-    ) : HudVisualSpec
+        val startingFromSummary: Boolean = false,
+    ) : HudVisualSpec {
+        val leftPhase: WalkPhase get() = leftPhaseFor(phase, startingFromSummary)
+    }
+}
+
+private fun leftPhaseFor(phase: WalkPhase, startingFromSummary: Boolean) = when (phase) {
+    is WalkPhase.Starting -> if (startingFromSummary) WalkPhase.Summary else WalkPhase.Standby
+    is WalkPhase.Ending -> WalkPhase.Measuring
+    else -> phase
 }
 
 internal fun hudVisualSpecFor(
@@ -54,14 +63,16 @@ internal fun hudVisualSpecFor(
     noticePending: Boolean = false,
     phase: WalkPhase = WalkPhase.Measuring,
     countdown: Int? = null,
+    startingFromSummary: Boolean = false,
 ): HudVisualSpec {
     if (state.motionState == MotionState.FAST) return HudVisualSpec.Fast
     if (userHidden) return HudVisualSpec.Hidden
     val stopped = state.motionState == MotionState.STOPPED
     val noFix = state.motionState == MotionState.NO_FIX
     val opacity = if (stopped) 1f else 0.7f
+    val leftPhase = leftPhaseFor(phase, startingFromSummary)
     val detail = when {
-        stopped || phase == WalkPhase.Summary -> listOfNotNull(
+        stopped || leftPhase == WalkPhase.Summary -> listOfNotNull(
             formatElapsedTime(state.elapsedMillis),
             formatAveragePace(state.walkingTimeMillis, state.distanceMeters),
         ).joinToString(" ・ ")
@@ -71,10 +82,10 @@ internal fun hudVisualSpecFor(
     return HudVisualSpec.Clusters(
         opacity = opacity,
         distance = formatDistance(state.distanceMeters),
-        distanceColor = if (noFix && phase != WalkPhase.Summary) HudDimmed else HudText,
+        distanceColor = if (noFix && leftPhase != WalkPhase.Summary) HudDimmed else HudText,
         walkingTime = formatWalkingTime(state.walkingTimeMillis),
         detail = detail,
-        address = formatAddress(state.address, multiline = stopped && phase != WalkPhase.Standby),
+        address = formatAddress(state.address, multiline = stopped && leftPhase != WalkPhase.Standby),
         addressLines = if (stopped) 2 else 1,
         addressColor = if (noFix || (state.address as? AddressState.Available)?.stale == true) HudDimmed else HudAddress,
         mapDiameter = if (stopped) Layout.stoppedDiameter else Layout.walkingDiameter,
@@ -86,5 +97,6 @@ internal fun hudVisualSpecFor(
         mapOpacity = if (noFix) 0.3f else opacity,
         phase = phase,
         countdown = countdown,
+        startingFromSummary = startingFromSummary,
     )
 }

@@ -4,6 +4,13 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Looper
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -12,16 +19,79 @@ import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import java.time.Duration
 
 @RunWith(AndroidJUnit4::class)
 @Config(application = AuraWalkApplication::class)
 class MainActivityWalkTest {
+    @get:Rule val compose = createEmptyComposeRule()
+
+    @Test
+    fun countdownPanelDisplaysAndCancelsBothPhasesAndBlocksBigMap() {
+        val app = ApplicationProvider.getApplicationContext<AuraWalkApplication>()
+        app.applicationInfo.flags = app.applicationInfo.flags or ApplicationInfo.FLAG_DEBUGGABLE
+        shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        SafetyNotice(app).markShown()
+        val intent = Intent(app, MainActivity::class.java).putExtra("startMode", "standby")
+        Robolectric.buildActivity(MainActivity::class.java, intent).setup().use { controller ->
+            val controls = ViewModelProvider(controller.get())[HudControls::class.java]
+            val left = compose.onNodeWithTag("left")
+            val countdown = compose.onNodeWithTag("countdown")
+            val map = compose.onNodeWithTag("map")
+            fun textIn(tag: String, text: String) =
+                compose.onNode(hasAnyAncestor(hasTestTag(tag)) and hasText(text), useUnmergedTree = true)
+
+            left.performClick()
+            countdown.assertIsDisplayed()
+            textIn("countdown", "開始").assertIsDisplayed()
+            textIn("countdown", "3").assertIsDisplayed()
+            textIn("countdown", "タップでキャンセル").assertIsDisplayed()
+            textIn("left", "タップで開始").assertIsDisplayed()
+            textIn("left", "3").assertDoesNotExist()
+            map.performClick()
+            compose.onNodeWithTag("bigmap").assertDoesNotExist()
+            assertTrue(ShadowLog.getLogsForTag("AuraInput").any {
+                it.msg == "CLICK target=map source=compose ignored-countdown"
+            })
+
+            val main = shadowOf(Looper.getMainLooper())
+            main.idleFor(Duration.ofSeconds(1))
+            textIn("countdown", "2").assertIsDisplayed()
+            main.idleFor(Duration.ofSeconds(1))
+            textIn("countdown", "1").assertIsDisplayed()
+            countdown.performClick()
+            countdown.assertDoesNotExist()
+            assertEquals(WalkPhase.Standby, controls.phase)
+            assertTrue(ShadowLog.getLogsForTag("AuraInput").any {
+                it.msg == "CLICK target=countdown source=compose"
+            })
+
+            left.performClick()
+            main.idleFor(Duration.ofMillis(3_050))
+            assertEquals(WalkPhase.Measuring, controls.phase)
+            left.performClick()
+            textIn("countdown", "終了").assertIsDisplayed()
+            textIn("countdown", "3").assertIsDisplayed()
+            textIn("countdown", "タップでキャンセル").assertIsDisplayed()
+            textIn("left", "歩行 00:00").assertIsDisplayed()
+            textIn("left", "3").assertDoesNotExist()
+            countdown.performClick()
+            assertEquals(WalkPhase.Measuring, controls.phase)
+            left.performClick()
+            countdown.assertIsDisplayed()
+            left.performClick()
+            countdown.assertDoesNotExist()
+            assertEquals(WalkPhase.Measuring, controls.phase)
+        }
+    }
+
     @Test
     fun debugReceiverRequiresDumpAndSharesTheCountdownAndNoticePath() {
         val app = ApplicationProvider.getApplicationContext<AuraWalkApplication>()
@@ -39,6 +109,10 @@ class MainActivityWalkTest {
             assertEquals(WalkPhase.Standby, controls.phase)
             receiver.broadcastReceiver.onReceive(activity, left)
             assertTrue(controls.phase is WalkPhase.Starting)
+            val countdown = Intent(DEBUG_TAP_ACTION).putExtra("target", "countdown")
+            receiver.broadcastReceiver.onReceive(activity, countdown)
+            assertEquals(WalkPhase.Standby, controls.phase)
+            receiver.broadcastReceiver.onReceive(activity, left)
             val main = shadowOf(Looper.getMainLooper())
             main.idle()
             main.idleFor(Duration.ofMillis(3_050))
