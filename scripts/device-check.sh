@@ -6,7 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
-all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband,spatial,geospatial
+all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband,spatial,spatialtest,geospatial
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -609,6 +609,27 @@ check_nav() {
     replay_scenario stop || true
 }
 
+check_spatialtest() {
+    if ! adb_retry shell pm grant "$pkg" android.permission.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
+        record FAIL 'spatialtest A のアンカー権限'
+    fi
+    local duration=15
+    echo "spatialtest: 今から${duration}秒、正面を見て A と B のどちらが見えるか確かめてください。"
+    if ! start_run spatialtest -W --es mode spatialtest; then
+        echo 'spatialtest: 終わり'
+        return 0
+    fi
+    sleep "$duration"
+    echo 'spatialtest: 終わり'
+    if ! adb_retry shell am force-stop "$pkg" >> "$log"; then
+        record FAIL 'spatialtest 終了'
+    fi
+    if ! adb_retry logcat -d -v threadtime -t "$start_time" -s AuraSpatialTest | tee -a "$log"; then
+        record FAIL 'spatialtest 診断ログ取得'
+    fi
+    record SKIP 'spatialtest 描画の判定はグラス越しの目視'
+}
+
 check_geospatial() {
     start_run geospatial -W --es startMode auto || return 0
     echo 'geospatial: VPS の対応地点で、初回は「使う」を選び、徒歩案内を開始してください（最大120秒）。'
@@ -1001,8 +1022,9 @@ main() {
         if selected bigmap; then record SKIP 'bigmap（装着が必要）'; fi
         if selected skyband; then record SKIP 'skyband（装着が必要）'; fi
         if selected spatial; then record SKIP 'spatial（装着が必要）'; fi
+        if selected spatialtest; then record SKIP 'spatialtest（装着が必要）'; fi
         if selected geospatial; then record SKIP 'geospatial（屋外での装着が必要）'; fi
-        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband|spatial|geospatial)(,(placement|headmotion|input|bigmap|skyband|spatial|geospatial))*$ ]]; then
+        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband|spatial|spatialtest|geospatial)(,(placement|headmotion|input|bigmap|skyband|spatial|spatialtest|geospatial))*$ ]]; then
             printf '%s\n' "${results[@]}"
             return 0
         fi
@@ -1034,6 +1056,7 @@ main() {
     if selected nav; then check_nav; fi
     if ! $preview && selected skyband; then check_skyband; fi
     if ! $preview && selected spatial; then check_spatial; fi
+    if ! $preview && selected spatialtest; then check_spatialtest; fi
     if ! $preview && selected geospatial; then check_geospatial; fi
     summary
     return "$failed"

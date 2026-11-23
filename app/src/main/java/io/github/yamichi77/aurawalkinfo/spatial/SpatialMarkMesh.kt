@@ -3,12 +3,13 @@ package io.github.yamichi77.aurawalkinfo.spatial
 import androidx.compose.ui.graphics.Color
 import androidx.xr.runtime.Session
 import androidx.xr.runtime.math.BoundingBox
+import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.runtime.math.Vector4
 import androidx.xr.scenecore.AlphaMode
-import androidx.xr.scenecore.AnchorSpace
 import androidx.xr.scenecore.ByteBufferRegion
 import androidx.xr.scenecore.CustomMesh
+import androidx.xr.scenecore.Entity
 import androidx.xr.scenecore.KhronosUnlitMaterial
 import androidx.xr.scenecore.MeshBuffer
 import androidx.xr.scenecore.MeshEntity
@@ -23,8 +24,8 @@ import java.nio.ByteOrder
 private const val MAX_VERTICES_PER_STROKE = 2 * (8 - 2) * 3 * 2
 private const val POSITION_BYTES = 3 * Float.SIZE_BYTES
 
-internal class SpatialMarkMesh(private val kind: MarkKind) : AutoCloseable {
-    private val capacities = kind.strokeCounts.map { it * MAX_VERTICES_PER_STROKE }
+internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
+    private val capacities = strokeCounts.map { it * MAX_VERTICES_PER_STROKE }
     private val vertexCount = capacities.sum()
     private val vertices = directBuffer(vertexCount * POSITION_BYTES)
     private val vertexData = ByteBufferRegion(vertices, 0, vertices.capacity())
@@ -36,7 +37,7 @@ internal class SpatialMarkMesh(private val kind: MarkKind) : AutoCloseable {
     private var lastColors: List<Color> = emptyList()
     private var lastOpacity = -1f
 
-    suspend fun initialize(session: Session, parent: AnchorSpace) {
+    suspend fun initialize(session: Session, parent: Entity, pose: Pose = Pose.Identity): MeshEntity {
         val indices = directBuffer(vertexCount * Int.SIZE_BYTES)
         repeat(vertexCount) { indices.putInt(it) }
         indices.rewind()
@@ -57,10 +58,11 @@ internal class SpatialMarkMesh(private val kind: MarkKind) : AutoCloseable {
         }
         val customMesh = builder.setBounds(bounds(Vector3.Zero, Vector3.Zero)).build()
         mesh = customMesh
-        val node = MeshEntity.create(session, customMesh, materials)
+        val node = MeshEntity.create(session, customMesh, materials, pose = pose)
         entity = node
         node.setEnabled(false)
         node.parent = parent
+        return node
     }
 
     fun draw(geometry: List<List<MarkVector>>, colors: List<Color>, opacity: Float) {

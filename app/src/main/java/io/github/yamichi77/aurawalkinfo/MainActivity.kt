@@ -42,6 +42,7 @@ import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.spatial.SCENE_UNDERSTANDING_COARSE
 import io.github.yamichi77.aurawalkinfo.spatial.SpatialMarks
+import io.github.yamichi77.aurawalkinfo.spatial.SpatialRenderDiagnosis
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
@@ -118,8 +119,10 @@ class MainActivity : ComponentActivity() {
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         val debugBuild = isDebugBuild()
         val mode = if (debugBuild) intent.getStringExtra("mode") else null
+        val spatialTest = mode == "spatialtest"
         val headingSpeech = mode == "heading" || mode == "speech"
-        val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" || headingSpeech
+        val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" ||
+            headingSpeech || spatialTest
         val debug = if (debugBuild) HudDebugOptions.from(intent) else HudDebugOptions()
         fakeMotion = debug.fakeState?.motionState
         val notice = container.safetyNotice
@@ -152,7 +155,15 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (savedInstanceState == null && !probe && debug.fakeState == null) {
+        if (savedInstanceState == null && spatialTest &&
+            packageManager.hasSystemFeature("android.software.xr.api.spatial")
+        ) {
+            val missing = buildList {
+                if (!headTrackingGranted) add(HEAD_TRACKING)
+                if (!spatialAnchorGranted) add(SCENE_UNDERSTANDING_COARSE)
+            }
+            if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray())
+        } else if (savedInstanceState == null && !probe && debug.fakeState == null) {
             val missing = buildList {
                 if (!locationGranted) {
                     add(Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -205,6 +216,8 @@ class MainActivity : ComponentActivity() {
             AdditiveDisplayTheme {
                 if (headingSpeech) {
                     HeadingSpeechScreen(this, requireNotNull(mode), container.headPoses)
+                } else if (spatialTest) {
+                    SpatialRenderDiagnosis(headTrackingGranted, spatialAnchorGranted)
                 } else if (probe) {
                     DiagnosticsScreen(this, mode, debug.capture)
                 } else {
