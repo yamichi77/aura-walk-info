@@ -19,6 +19,9 @@ import io.github.yamichi77.aurawalkinfo.location.FusedLocationRepository
 import io.github.yamichi77.aurawalkinfo.location.GpsLocationRepository
 import io.github.yamichi77.aurawalkinfo.location.LocationRepository
 import io.github.yamichi77.aurawalkinfo.location.androidDistanceCalculator
+import io.github.yamichi77.aurawalkinfo.nav.NavRepository
+import io.github.yamichi77.aurawalkinfo.nav.androidNavService
+import io.github.yamichi77.aurawalkinfo.nav.registerNavDebugReceiver
 import io.github.yamichi77.aurawalkinfo.pics.PicsReceiver
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.Clock
@@ -29,7 +32,10 @@ import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import java.io.File
 import java.io.IOException
 import java.time.ZonedDateTime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
@@ -86,8 +92,15 @@ class AppContainer(context: Context) {
         } else null,
     )
 
-    private val inputs = if (debuggable) ReplayController(appContext, clock, realInput).inputs else flowOf(realInput)
+    private val navScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val replay = if (debuggable) ReplayController(appContext, clock, realInput, navScope) else null
+    private val inputs = replay?.inputs ?: flowOf(realInput)
     val walkSessionRepository = WalkSessionRepository(inputs, androidDistanceCalculator)
     internal val picsReceiver = PicsReceiver(appContext, clock, debuggable)
+    val navRepository = NavRepository(navScope, androidNavService(appContext), permissionGatedLocation.locations, clock)
     val safetyNotice = SafetyNotice(appContext)
+
+    init {
+        replay?.let { registerNavDebugReceiver(appContext, navRepository, it.navigationLocations) }
+    }
 }
