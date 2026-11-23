@@ -11,6 +11,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 
 internal data class PicsScanAccess(val scanner: BluetoothLeScanner? = null, val reason: String? = null)
@@ -63,7 +64,9 @@ internal suspend fun scanBle(
         return "scan error ${failure.await()}"
     } catch (_: SecurityException) {
         return "permission missing"
-    } catch (_: IllegalStateException) {
+    } catch (error: IllegalStateException) {
+        // Coroutine cancellation is also an IllegalStateException. Never report it as Bluetooth off.
+        if (error is CancellationException) throw error
         return "Bluetooth off"
     } finally {
         active = false
