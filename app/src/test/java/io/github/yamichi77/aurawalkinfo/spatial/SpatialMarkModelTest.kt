@@ -94,12 +94,12 @@ class SpatialMarkModelTest {
             val pillar = markStrokes(MarkKind.DESTINATION, center, north, MarkVector.UP, eye)
             for (stroke in arrow + pillar) {
                 val far = maxOf((stroke.start - eye).length(), (stroke.end - eye).length())
-                assertTrue("Stroke at ${distance}m", angle(stroke.width, far) >= 0.15 - 1e-9)
+                assertTrue("Stroke at ${distance}m", angle(stroke.width, far) >= MIN_STROKE_ANGLE_DEGREES - 1e-9)
             }
             val arrowPoints = arrow.map { it.start }
             val width = arrowPoints.maxOf { it.x } - arrowPoints.minOf { it.x }
             val far = arrowPoints.maxOf { (it - eye).length() }
-            assertTrue("Arrow at ${distance}m", angle(width, far) >= 3.0 - 1e-9)
+            assertTrue("Arrow at ${distance}m", angle(width, far) >= MIN_ARROW_ANGLE_DEGREES - 1e-9)
         }
     }
 

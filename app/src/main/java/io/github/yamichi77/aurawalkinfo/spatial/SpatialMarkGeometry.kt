@@ -4,8 +4,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.tan
 
-internal const val MIN_STROKE_ANGLE_DEGREES = 0.15
-internal const val MIN_ARROW_ANGLE_DEGREES = 3.0
+internal const val MIN_STROKE_ANGLE_DEGREES = 0.3 // 2026-11-24: 0.15 から太くした（ユーザー要望「もっと目立たせたい」）
+internal const val MIN_ARROW_ANGLE_DEGREES = 5.0 // 2026-11-24: 3.0 から大きくした（同上）
 private const val ARROW_WIDTH_METERS = 2.0
 private const val ARROW_RADIUS_METERS = 1.25
 

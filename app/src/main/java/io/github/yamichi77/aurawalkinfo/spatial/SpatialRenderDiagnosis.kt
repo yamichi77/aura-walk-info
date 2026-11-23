@@ -40,6 +40,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "AuraSpatialTest"
+private const val BASE_DISTANCE_METERS = 4f
+
+/** Debug only: distance of the test marks, set by `--ef distance`. Sizes scale to keep the same angle. */
+internal var spatialTestDistanceMeters = BASE_DISTANCE_METERS
 
 @Composable
 internal fun SpatialRenderDiagnosis(headGranted: Boolean, anchorGranted: Boolean) {
@@ -147,10 +151,13 @@ private enum class Sample(val label: String, val anchored: Boolean, val isMesh: 
     B_MESH("B-mesh", false, true),
     B_PANEL("B-panel", false, false);
 
-    fun poseFrom(head: Pose): Pose = head.compose(
+    fun poseFrom(head: Pose): Pose {
+        val scale = spatialTestDistanceMeters / BASE_DISTANCE_METERS
         // SceneCore uses +X right, +Y up and -Z forward.
-        Pose(Vector3(if (anchored) -1.2f else 1.2f, if (isMesh) 0.8f else 0f, -4f)),
-    )
+        return head.compose(
+            Pose(Vector3((if (anchored) -1.2f else 1.2f) * scale, (if (isMesh) 0.8f else 0f) * scale, -4f * scale)),
+        )
+    }
 }
 
 private class DiagnosisEntity(val kind: Sample) : AutoCloseable {
@@ -173,7 +180,9 @@ private class DiagnosisEntity(val kind: Sample) : AutoCloseable {
                     kind.label, pose = pose, parent = parent,
                 )
             }
-            "CREATED"
+            // Keep the apparent size constant so only the distance changes between runs.
+            entity?.setScale(spatialTestDistanceMeters / BASE_DISTANCE_METERS)
+            "CREATED distance=${spatialTestDistanceMeters}"
         }.getOrElse {
             close()
             "FAILED:${it.javaClass.simpleName}"

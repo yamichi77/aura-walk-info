@@ -85,6 +85,7 @@ internal fun SpatialMarks(
                 var fixPoint: NavPoint? = null
                 var fixEye: Vector3? = null
                 var lastEye: Vector3? = null
+                var nextRelativeLogAt = 0L
                 var nextPositionAt = 0L
                 var wasVps = false
                 var placementFailure: MarkReason? = null
@@ -155,6 +156,12 @@ internal fun SpatialMarks(
                                 }
                             }
                             scene.draw(reason, targets, lastEye, now)
+                            if (debug && now >= nextRelativeLogAt) {
+                                // Where each mark is as seen from the head (T20: marks were logged as shown but not seen).
+                                nextRelativeLogAt = now + 1_000L
+                                device?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING }
+                                    ?.devicePose?.let { scene.logRelative(it, now) }
+                            }
                             interval = spatialUpdateIntervalMillis(mode, scene.isFading)
                             if (interval != null) delay(interval)
                         }
@@ -250,6 +257,23 @@ private class SpatialMarkScene(
         return null
     }
 
+    fun logRelative(head: Pose, now: Long) {
+        val anchor = anchorPose() ?: return
+        for (mark in marks) {
+            val center = mark.centerAt(now) ?: continue
+            val relative = head.inverse.transformPoint(anchor.transformPoint(center.vector3()))
+            val yaw = Math.toDegrees(kotlin.math.atan2(relative.x.toDouble(), -relative.z.toDouble()))
+            val elevation = Math.toDegrees(
+                kotlin.math.atan2(relative.y.toDouble(), kotlin.math.hypot(relative.x.toDouble(), relative.z.toDouble())),
+            )
+            Log.i(
+                TAG, "RELATIVE mark=${mark.kind} opacity=${mark.opacity.toDouble().diagnostic()} " +
+                    "yawDeg=${yaw.diagnostic()} elevationDeg=${elevation.diagnostic()} " +
+                    "distanceM=${relative.length.toDouble().diagnostic()}",
+            )
+        }
+    }
+
     fun draw(reason: MarkReason?, decisions: List<MarkDecision>?, eye: Vector3?, now: Long) {
         val view = if (eye == null) null else anchorPose()?.inverse?.let { fromPerception ->
             MarkView(
@@ -289,6 +313,8 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
     var opacity = 0f
         private set
     val isFading get() = fade.isAnimating
+
+    fun centerAt(now: Long): MarkVector? = position?.at(now)
 
     suspend fun prepare(session: Session, context: Context, parent: AnchorSpace) {
         if (kind == MarkKind.SIGNAL) {

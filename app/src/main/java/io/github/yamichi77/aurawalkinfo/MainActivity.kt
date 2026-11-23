@@ -41,6 +41,7 @@ import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.spatial.SCENE_UNDERSTANDING_COARSE
+import io.github.yamichi77.aurawalkinfo.spatial.spatialTestDistanceMeters
 import io.github.yamichi77.aurawalkinfo.spatial.SpatialMarks
 import io.github.yamichi77.aurawalkinfo.spatial.SpatialRenderDiagnosis
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
@@ -120,6 +121,9 @@ class MainActivity : ComponentActivity() {
         val debugBuild = isDebugBuild()
         val mode = if (debugBuild) intent.getStringExtra("mode") else null
         val spatialTest = mode == "spatialtest"
+        if (spatialTest) {
+            spatialTestDistanceMeters = intent.getFloatExtra("distance", 4f).coerceIn(1f, 200f)
+        }
         val headingSpeech = mode == "heading" || mode == "speech"
         val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" ||
             headingSpeech || spatialTest
