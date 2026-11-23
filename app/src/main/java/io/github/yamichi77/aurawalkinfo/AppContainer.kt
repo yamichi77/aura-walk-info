@@ -19,6 +19,7 @@ import io.github.yamichi77.aurawalkinfo.location.FusedLocationRepository
 import io.github.yamichi77.aurawalkinfo.location.GpsLocationRepository
 import io.github.yamichi77.aurawalkinfo.location.LocationRepository
 import io.github.yamichi77.aurawalkinfo.location.androidDistanceCalculator
+import io.github.yamichi77.aurawalkinfo.pics.PicsReceiver
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionInput
@@ -84,5 +85,6 @@ class AppContainer(context: Context) {
 
     private val inputs = if (debuggable) ReplayController(appContext, clock, realInput).inputs else flowOf(realInput)
     val walkSessionRepository = WalkSessionRepository(inputs, androidDistanceCalculator)
+    internal val picsReceiver = PicsReceiver(appContext, clock, debuggable)
     val safetyNotice = SafetyNotice(appContext)
 }
