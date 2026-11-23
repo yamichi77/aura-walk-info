@@ -38,6 +38,8 @@ import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
 import io.github.yamichi77.aurawalkinfo.nav.AndroidDestinationSpeech
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
+import io.github.yamichi77.aurawalkinfo.spatial.SCENE_UNDERSTANDING_COARSE
+import io.github.yamichi77.aurawalkinfo.spatial.SpatialMarks
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
@@ -85,6 +87,7 @@ class MainActivity : ComponentActivity() {
 
     private var locationGranted by mutableStateOf(false)
     private var headTrackingGranted by mutableStateOf(false)
+    private var spatialAnchorGranted by mutableStateOf(false)
     private val bleProbePermissionsReady = MutableStateFlow(false)
     private var bigMap3d by mutableStateOf(false)
     private var microphoneRequest: CompletableDeferred<Boolean>? = null
@@ -157,6 +160,9 @@ class MainActivity : ComponentActivity() {
                 if (!headTrackingGranted && packageManager.hasSystemFeature("android.software.xr.api.spatial")) {
                     add(HEAD_TRACKING)
                 }
+                if (!spatialAnchorGranted && container.hudSettings.spatialMarks &&
+                    packageManager.hasSystemFeature("android.software.xr.api.spatial")
+                ) add(SCENE_UNDERSTANDING_COARSE)
                 if (supportsPicsBle() && !hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
                     add(Manifest.permission.BLUETOOTH_SCAN)
                 }
@@ -233,6 +239,12 @@ class MainActivity : ComponentActivity() {
                     CompositionLocalProvider(LocalPicsReferenceNotice provides container.picsReferenceNotice) {
                         if (spatial) {
                             if (headTrackingGranted) {
+                                SpatialMarks(
+                                    debug.fakeState ?: state, navState,
+                                    pics.takeIf { (spec as? HudVisualSpec.Clusters)?.pics != null },
+                                    skyBandSettings, container.headingTracking, spatialAnchorGranted,
+                                    denied, debugBuild,
+                                )
                                 HudScene(
                                     spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
                                     controls.quantumStartup, container.wallClock, bigMapMode, onTap,
@@ -264,6 +276,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshPermissions() {
         locationGranted = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
         headTrackingGranted = hasPermission(HEAD_TRACKING)
+        spatialAnchorGranted = hasPermission(SCENE_UNDERSTANDING_COARSE)
         if (!locationGranted && fakeMotion == null) destinationInput.close()
     }
 

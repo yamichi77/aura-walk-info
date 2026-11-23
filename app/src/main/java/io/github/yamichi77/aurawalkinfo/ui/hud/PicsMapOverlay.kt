@@ -103,16 +103,18 @@ internal fun PicsMapOverlay(
 internal fun DrawScope.drawPicsDots(display: PicsHudDisplay, origin: Offset, diameter: Float) {
     val fresh = display.freshness == PicsFreshness.FRESH
     display.dots.forEachIndexed { index, aspect ->
-        val color = when {
-            !fresh -> PicsStaleColor
-            aspect == PicsAspect.RED -> Color(0xFFE07A7A)
-            aspect == PicsAspect.GREEN || aspect == PicsAspect.FLASHING_GREEN -> Color(0xFF7FBFA8)
-            else -> PicsStaleColor
-        }
+        val color = picsDotColor(fresh, aspect)
         val dx = (index - (display.dots.size - 1) / 2f) * diameter * 0.28f
         drawCircle(
             color, diameter * 0.09f, origin + Offset(dx, diameter * 0.72f),
             style = if (fresh && aspect == PicsAspect.FLASHING_GREEN) Stroke(1f) else Fill,
         )
     }
+}
+
+internal fun picsDotColor(fresh: Boolean, aspect: PicsAspect): Color = when {
+    !fresh -> PicsStaleColor
+    aspect == PicsAspect.RED -> Color(0xFFE07A7A)
+    aspect == PicsAspect.GREEN || aspect == PicsAspect.FLASHING_GREEN -> Color(0xFF7FBFA8)
+    else -> PicsStaleColor
 }

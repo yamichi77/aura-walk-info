@@ -12,16 +12,25 @@ import kotlinx.coroutines.flow.mapNotNull
 internal enum class PicsReplay(val command: String, private val distanceMeters: Double) {
     RED_TO_GREEN("red_to_green", 10.0),
     STALE("stale", 10.0),
-    FAR("far", 40.0);
+    FAR("far", 40.0),
+    SPATIAL("spatial", 25.0);
 
     suspend fun play(states: Flow<WalkSessionState>, receive: (ByteArray) -> Unit) {
         val origin = states.mapNotNull { it.mapCenter }.firstOrNull() ?: return
         val delta = Math.toDegrees(distanceMeters / EARTH_RADIUS_METERS)
         val latitude = if (origin.latitude + delta <= 90.0) origin.latitude + delta else origin.latitude - delta
         receive(positionPacket(MapCenter(latitude, origin.longitude)))
+        if (this == SPATIAL) {
+            // Keep the intersection within the forward field of view long enough to observe.
+            repeat(12) { index ->
+                if (index > 0) delay(600L)
+                receive(packet(2, 2).put(0x21.toByte()).put(0x73.toByte()).array())
+            }
+            return
+        }
         val signals = when (this) {
             RED_TO_GREEN -> listOf(0x21, 0x11, 0x01, 0x02, 0x73)
-            STALE, FAR -> listOf(0x21)
+            else -> listOf(0x21)
         }
         signals.forEachIndexed { index, signal ->
             if (index > 0) delay(600L)

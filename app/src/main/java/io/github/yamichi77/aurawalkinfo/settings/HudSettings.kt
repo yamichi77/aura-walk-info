@@ -16,4 +16,10 @@ internal class HudSettings(context: Context) {
         set(value) {
             preferences.edit().putBoolean("big_map_3d", value).apply()
         }
+
+    var spatialMarks: Boolean
+        get() = preferences.getBoolean("spatial_marks", true)
+        set(value) {
+            preferences.edit().putBoolean("spatial_marks", value).apply()
+        }
 }

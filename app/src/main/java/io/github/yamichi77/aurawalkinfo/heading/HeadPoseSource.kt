@@ -17,7 +17,10 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 internal class HeadPoseSource {
@@ -62,6 +65,7 @@ internal class HeadPoseSource {
             val yaw = Math.toDegrees(atan2(sinYaw, cosYaw)).takeIf { hypot(sinYaw, cosYaw) > 1e-6 }
             return HeadPose(
                 now, HeadTracking.TRACKING, originX?.let { x - it }, originZ?.let { z - it }, yaw,
+                pose.translation,
             )
         }
 
@@ -79,22 +83,42 @@ internal class HeadPoseSource {
 
 internal class HeadingTracking {
     private val estimator = HeadingEstimator()
-    private var latestPose: HeadPose? = null
+    private val latestPose = MutableStateFlow<HeadPose?>(null)
+    private var fixPose: HeadPose? = null
+    private var fixTime: Long? = null
 
     fun onPose(pose: HeadPose) {
-        latestPose = pose
+        latestPose.value = pose
         estimator.onPose(pose)
     }
 
-    fun onFix(fix: HeadingFix) = estimator.onFix(fix)
+    fun onFix(fix: HeadingFix) {
+        fixTime = fix.timeMillis
+        fixPose = latestPose.value?.takeIf {
+            it.tracking == HeadTracking.TRACKING &&
+                kotlin.math.abs(it.timeMillis - fix.timeMillis) <= HeadingEstimator.MAX_POSE_GAP_MS
+        }
+        estimator.onFix(fix)
+    }
 
-    fun poseAt(nowMillis: Long): HeadPose? =
-        latestPose?.takeIf { nowMillis - it.timeMillis in 0..HeadingEstimator.MAX_POSE_GAP_MS }
+    fun poseForFix(timeMillis: Long?): HeadPose? = fixPose.takeIf { timeMillis == fixTime }
+
+    fun poseAt(nowMillis: Long): HeadPose? = latestPose.value?.takeIf { it.isRecent(nowMillis) }
+
+    // Debug calibration may request a bearing before the marker loop has any targets.
+    suspend fun awaitTrackedYaw(): Double = latestPose.mapNotNull { pose ->
+        pose?.takeIf { it.tracking == HeadTracking.TRACKING && it.isRecent(SystemClock.elapsedRealtime()) }?.yawDegrees
+    }.first()
+
+    private fun HeadPose.isRecent(nowMillis: Long) =
+        nowMillis - timeMillis in 0..HeadingEstimator.MAX_POSE_GAP_MS
 
     fun estimate(nowMillis: Long): NorthEstimate? = estimator.estimate(nowMillis)
 
     fun clear() {
-        latestPose = null
+        latestPose.value = null
+        fixPose = null
+        fixTime = null
         estimator.reset()
     }
 }

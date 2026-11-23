@@ -15,6 +15,7 @@ internal data class HeadPose(
     val xMeters: Double? = null,
     val zMeters: Double? = null,
     val yawDegrees: Double? = null,
+    val perceptionPosition: androidx.xr.runtime.math.Vector3? = null,
 )
 
 internal data class HeadingFix(

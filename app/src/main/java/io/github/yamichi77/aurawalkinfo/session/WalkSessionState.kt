@@ -15,4 +15,5 @@ data class WalkSessionState(
     val mapBearingDeg: Float? = null,
     val lastFixAccuracyMeters: Float? = null,
     val gpsCourseDeg: Float? = null,
+    val lastFixTimeMillis: Long? = null,
 )

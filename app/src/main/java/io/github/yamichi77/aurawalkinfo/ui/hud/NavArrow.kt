@@ -2,6 +2,7 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import io.github.yamichi77.aurawalkinfo.heading.normalizeDegrees
 import io.github.yamichi77.aurawalkinfo.nav.NavGuidance
+import io.github.yamichi77.aurawalkinfo.nav.NavStep
 import io.github.yamichi77.aurawalkinfo.nav.bearingTo
 import kotlin.math.abs
 import kotlin.math.cos
@@ -71,10 +72,12 @@ internal data class NavArrowAim(val reference: NavArrowReference, val angle: Dou
 internal fun navArrowTravelBearing(guidance: NavGuidance): Double? {
     val turn = guidance.nextTurn ?: return guidance.destinationBearingDegrees
     if (turn.distanceMeters > 15.0) return turn.bearingDegrees
-    val step = turn.step
-    return step.polyline.asSequence().zipWithNext().firstNotNullOfOrNull { (from, to) -> from.bearingTo(to) }
-        ?: step.start.bearingTo(step.end)
+    return turn.step.outgoingBearing()
 }
+
+internal fun NavStep.outgoingBearing(): Double? =
+    polyline.asSequence().zipWithNext().firstNotNullOfOrNull { (from, to) -> from.bearingTo(to) }
+        ?: start.bearingTo(end)
 
 internal fun shortestArrowTurn(from: Double, to: Double): Double = normalizeDegrees(to - from + 180) - 180
 

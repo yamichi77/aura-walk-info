@@ -61,6 +61,7 @@ internal data class HudDebugOptions(
                         address = AddressState.Available(AddressParts("架空県", "みほん市", "試験町", "1丁目")),
                         // Synthetic fix near the public origin of the walk_stop replay.
                         mapCenter = MapCenter(35.6812, 139.7658),
+                        lastFixAccuracyMeters = if (it != MotionState.NO_FIX) 5f else null,
                     )
                 },
             )

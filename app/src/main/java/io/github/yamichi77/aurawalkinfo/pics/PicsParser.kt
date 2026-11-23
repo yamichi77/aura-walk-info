@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 
 internal const val PICS_COMPANY_ID = 0x01CE
 internal const val TEST_COMPANY_ID = 0xFFFF
+internal const val MAX_PICS_LIGHTS = 16
 
 internal sealed interface PicsPacket {
     val intersectionId: String
@@ -34,7 +35,7 @@ internal class PicsParser(debuggable: Boolean) {
                 if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
                 PicsPacket.Position(id, MapCenter(latitude, longitude))
             }
-            2 -> PicsPacket.Signal(id, (10 until minOf(data.size, 26)).map { offset ->
+            2 -> PicsPacket.Signal(id, (10 until minOf(data.size, 10 + MAX_PICS_LIGHTS)).map { offset ->
                 val value = data[offset].toInt() and 0xFF
                 val aspect = when (value and 0x0F) {
                     0 -> PicsAspect.NONE
