@@ -24,6 +24,10 @@ internal enum class HudPanel(val yaw: Float, val pitch: Float) {
     RIGHT(Layout.rightYaw, Layout.pitch),
     GRID(0f, 0f),
     BIGMAP(0f, HudPlacement.bigMapPitch),
+    ;
+
+    /** Pitch of the panel center. The left panel grows upward from its anchor for the clock row (T14). */
+    val centerPitch: Float get() = if (this == LEFT) HudPlacement.statsCenterPitch else pitch
 }
 
 internal class HudPlacementCheck(includeGrid: Boolean) {
@@ -52,7 +56,7 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         val relative = inverseHead.compose(panel.entity.getPose(Space.ACTIVITY))
         val measured = measure(name, relative, panel.width, panel.height)
         val diameter = Math.toDegrees(atan2(minOf(panel.width, panel.height) / 2, measured.distance).toDouble()) * 2
-        val pass = abs(measured.yaw - name.yaw) <= 1 && abs(measured.pitch - name.pitch) <= 1 &&
+        val pass = abs(measured.yaw - name.yaw) <= 1 && abs(measured.pitch - name.centerPitch) <= 1 &&
             abs(diameter - HudPlacement.bigMapDiameter) <= 1 && abs(panel.width - panel.height) <= 0.01f &&
             abs(measured.distance - Layout.distanceMeters) <= 0.05f
         Log.i(Tag, "BIGMAP ${verdict(pass)} yaw=${decimal(measured.yaw)} pitch=${decimal(measured.pitch)} " +
@@ -152,7 +156,7 @@ private fun reportPlacement(name: HudPanel, samples: List<Measurement>): Boolean
     val edgePass = name == HudPanel.GRID || (edge > requiredEdge && nearestEdge > Layout.clearZoneDegrees)
     val maxNormal = samples.maxOf { it.normal }
     val maxDistanceError = samples.maxOf { abs(it.distance - Layout.distanceMeters) }
-    val pass = abs(yaw - name.yaw) <= 1 && abs(pitch - name.pitch) <= 1 &&
+    val pass = abs(yaw - name.yaw) <= 1 && abs(pitch - name.centerPitch) <= 1 &&
         edgePass && maxNormal <= 5 && maxDistanceError <= 0.05f
     val edgeValues = if (name == HudPanel.GRID) "" else
         " innerEdgeMedian=${decimal(edge)}° innerEdgeMin=${decimal(nearestEdge)}°"

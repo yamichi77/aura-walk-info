@@ -98,6 +98,10 @@ internal object HudPlacement {
     val statsWidthMeters = 2 * (Layout.distanceMeters * cos(radians(Layout.pitch)) -
         statsBelowAnchor * sin(radians(-Layout.pitch))) * tangent(maxInnerHalfYaw)
 
+    val statsCenterPitch: Float get() = statsPose().translation.let { center ->
+        Math.toDegrees(kotlin.math.atan2(center.y, kotlin.math.hypot(center.x, center.z)).toDouble()).toFloat()
+    }
+
     fun statsPose(): Pose {
         val anchor = pose(Layout.leftYaw, Layout.pitch)
         // Extend the panel upward along its plane, retaining the lower edge and anchor.

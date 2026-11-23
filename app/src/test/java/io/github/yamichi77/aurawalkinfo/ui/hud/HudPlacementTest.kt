@@ -105,4 +105,11 @@ class HudPlacementTest {
                 map.transformPoint(Vector3(0f, size / 2, 0f)).y)
         }
     }
+
+    @Test
+    fun leftPanelCenterSitsAboveTheAnchorByHalfTheClockRowExtension() {
+        // The placement self-check compares the measured center with this value.
+        val pitch = HudPlacement.statsCenterPitch
+        assertTrue("pitch=$pitch", pitch > Layout.pitch + 0.8f && pitch < Layout.pitch + 1.2f)
+    }
 }
