@@ -56,5 +56,22 @@ class HudPlacementTest {
         }
     }
 
+    @Test
+    fun navigationStaysAboveTheMapAndOutsideSixteenDegreesDuringResize() {
+        for (diameter in 8..12) {
+            val size = HudPlacement.mapSizeMeters(diameter.toFloat())
+            val nav = HudPlacement.navPose(size)
+            val map = HudPlacement.pose(Layout.rightYaw, Layout.pitch)
+            val bottom = nav.transformPoint(Vector3(0f, -HudPlacement.navHeightMeters / 2, 0f))
+            val top = map.transformPoint(Vector3(0f, size / 2, 0f))
+            assertTrue(bottom.y > top.y)
+            assertEquals(Layout.rightYaw.toDouble(), yaw(nav.translation), 0.0001)
+            for (y in listOf(-HudPlacement.navHeightMeters / 2, HudPlacement.navHeightMeters / 2)) {
+                val inside = nav.transformPoint(Vector3(-HudPlacement.navWidthMeters / 2, y, 0f))
+                assertTrue("diameter=$diameter yaw=${yaw(inside)}", yaw(inside) > 16.0)
+            }
+        }
+    }
+
     private fun yaw(point: Vector3) = Math.toDegrees(atan2(point.x, -point.z).toDouble())
 }

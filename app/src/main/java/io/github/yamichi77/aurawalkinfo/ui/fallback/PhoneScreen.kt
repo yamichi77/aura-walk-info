@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.HudPlacement
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudAnimationMillis
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
+import io.github.yamichi77.aurawalkinfo.ui.hud.NavGuidancePanel
 import io.github.yamichi77.aurawalkinfo.ui.hud.QuantumEffectsEnabled
 import io.github.yamichi77.aurawalkinfo.ui.hud.QuantumMap
 import io.github.yamichi77.aurawalkinfo.ui.hud.StatsPanel
@@ -95,11 +97,18 @@ internal fun PhoneScreen(
                     if (!locationDenied && spec is HudVisualSpec.Clusters && !showBigMap) {
                         val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
                         val size = (HudPlacement.mapSizeMeters(diameter) * dpPerMeter).dp
-                        QuantumMap(
-                            quantum.miniMap, large = false,
-                            Modifier.size(size).capturePanelOnNextDraw(debug.captureName("2d", "right")),
-                        ) { mapModifier ->
-                            ClickableMap(spec, debug, HudTarget.MAP, onTap, mapModifier)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            spec.navigation?.let { visual ->
+                                NavGuidancePanel(
+                                    visual, spec.opacity, Modifier.width((HudPlacement.navWidthMeters * dpPerMeter).dp),
+                                )
+                            }
+                            QuantumMap(
+                                quantum.miniMap, large = false,
+                                Modifier.size(size).capturePanelOnNextDraw(debug.captureName("2d", "right")),
+                            ) { mapModifier ->
+                                ClickableMap(spec, debug, HudTarget.MAP, onTap, mapModifier)
+                            }
                         }
                     } else if (spec is HudVisualSpec.Fast && debug.capture) {
                         // Capture a transparent reference showing that the right cluster was removed.

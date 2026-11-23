@@ -2,7 +2,10 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 
-internal enum class HudTarget { LEFT, MAP, BIGMAP, OUTSIDE, COUNTDOWN, BIGMAP_MODE }
+internal enum class HudTarget {
+    LEFT, MAP, BIGMAP, OUTSIDE, COUNTDOWN, BIGMAP_MODE,
+    NAV_DESTINATION, NAV_CANDIDATE_1, NAV_CANDIDATE_2, NAV_CANDIDATE_3, NAV_CANCEL,
+}
 
 internal data class BigMapControl(val closesAt: Long? = null) {
     val isOpen: Boolean get() = closesAt != null
@@ -24,6 +27,8 @@ internal data class BigMapControl(val closesAt: Long? = null) {
             }
             HudTarget.BIGMAP, HudTarget.OUTSIDE -> BigMapControl()
             HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP_MODE -> current
+            HudTarget.NAV_DESTINATION, HudTarget.NAV_CANDIDATE_1, HudTarget.NAV_CANDIDATE_2,
+            HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_CANCEL -> current
         }
     }
 }

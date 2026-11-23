@@ -56,6 +56,14 @@ internal object HudPlacement {
     val countdownHeightMeters = 2 * planeHalfSpan(7f)
     val countdownDigitHeightMeters = 2 * planeHalfSpan(2f)
     val bigMapArrowHeightMeters get() = mapArrowHeight(mapSizeMeters(Layout.walkingDiameter))
+    val navWidthMeters = 2 * planeHalfSpan(5.7f)
+    val navHeightMeters = 2 * planeHalfSpan(2.4f)
+
+    fun navPose(mapSizeMeters: Float): Pose {
+        val anchor = pose(Layout.rightYaw, Layout.pitch)
+        val offset = mapSizeMeters / 2 + planeHalfSpan(0.35f) + navHeightMeters / 2
+        return Pose(anchor.translation + anchor.up * offset, anchor.rotation)
+    }
 
     // Allow for layout's integer pixel rounding at the inside edges.
     private const val roundingMarginDegrees = 0.08f

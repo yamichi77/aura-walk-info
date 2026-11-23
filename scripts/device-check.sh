@@ -6,7 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
-all_checks=$default_checks,ble,pics,map3d,heading,speech
+all_checks=$default_checks,ble,pics,map3d,heading,speech,nav
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -579,11 +579,29 @@ wait_for_safety_log() {
     [[ $pid =~ ^[0-9]+$ ]] || return 1
     run_log=
     while (( SECONDS < deadline )); do
-        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics) || return 1
+        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav) || return 1
         if grep -Eq "$pattern" <<< "$run_log"; then return 0; fi
         sleep 0.25
     done
     return 1
+}
+
+check_nav() {
+    local flags=(--es startMode auto)
+    if $preview; then flags+=(--ez preview2d true); fi
+    start_run nav -W "${flags[@]}" || return 0
+    run_log=
+    if adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es scenario synthetic >> "$log" &&
+        replay_scenario navigation --ef speed 4 &&
+        wait_for_safety_log 'AuraNav[[:space:]]*: HUD state=arrived primary=到着しました' 30 &&
+        grep -Eq 'AuraNav[[:space:]]*: HUD state=guiding primary=.*右 secondary=残り ' <<< "$run_log"; then
+        record PASS 'nav 合成経路の曲がり角・残り・到着'
+    else
+        record FAIL 'nav 合成経路の案内ログを取得できません'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es action cancel >> "$log" || true
+    replay_scenario stop || true
 }
 
 check_t15_probe() {
@@ -808,6 +826,7 @@ main() {
     if selected map3d; then check_map3d; fi
     if selected heading; then check_t15_probe heading; fi
     if selected speech; then check_t15_probe speech; fi
+    if selected nav; then check_nav; fi
     summary
     return "$failed"
 }
