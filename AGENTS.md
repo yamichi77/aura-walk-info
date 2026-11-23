@@ -5,7 +5,7 @@ XREAL AURA（Android XR の有線XRグラス）向けの徒歩HUDアプリ。歩
 ## 進め方
 
 - ユーザーとのやり取りは日本語で行う
-- 今の作業指示は [docs/HANDOFF.md](docs/HANDOFF.md)（散歩での実機テストまで）。オーケストレーターは Opus、実装は Sol
+- 今の作業は [docs/PLAN.md](docs/PLAN.md) §9 の追加機能（2026-11-23 ユーザー承認）。散歩テストまでの経緯は [docs/HANDOFF.md](docs/HANDOFF.md)。オーケストレーターは Opus、実装は Sol（指示書は `docs/tasks/`）
 - 計画は [docs/PLAN.md](docs/PLAN.md) を正とし、フェーズ順に実装する。各フェーズの終わりに受け入れ条件を確認して報告する
 - HUD の見た目と振る舞いは [docs/UI.md](docs/UI.md)（ユーザー承認済み）に従う。参照モックは [docs/ui-mockup.html](docs/ui-mockup.html)。モックの座標は 1° = 8.5px で、角度に換算できる
 - **PLAN.md §2（安全設計）と UI.md の配置・閾値・状態ごとの表示を変える場合は、ユーザーに確認してから変える**（中央クリアゾーン ±15°、高速移動時の非表示など）
