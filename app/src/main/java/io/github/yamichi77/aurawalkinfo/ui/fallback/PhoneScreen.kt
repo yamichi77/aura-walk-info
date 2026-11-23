@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
+import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.hud.DebugAngleGrid
 import io.github.yamichi77.aurawalkinfo.ui.hud.ClickableMap
 import io.github.yamichi77.aurawalkinfo.ui.hud.CountdownPanel
@@ -52,6 +53,7 @@ internal fun PhoneScreen(
     bigMapOpen: Boolean,
     quantumEnabled: Boolean = QuantumEffectsEnabled,
     quantumStartup: HudQuantumStartup = remember { HudQuantumStartup() },
+    wallClock: WallClock? = null,
     onTap: (HudTarget) -> Unit,
 ) {
     val allMapsVisible = !locationDenied && spec is HudVisualSpec.Clusters
@@ -86,6 +88,7 @@ internal fun PhoneScreen(
                         ).hudClick(HudTarget.LEFT, onTap).capturePanelOnNextDraw(debug.leftCaptureName("2d", spec)),
                         onNoticeTimeout,
                         quantum.left,
+                        wallClock,
                     )
                     if (!locationDenied && spec is HudVisualSpec.Clusters && !showBigMap) {
                         val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))

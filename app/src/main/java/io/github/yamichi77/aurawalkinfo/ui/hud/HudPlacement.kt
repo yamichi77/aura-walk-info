@@ -61,9 +61,18 @@ internal object HudPlacement {
     private const val roundingMarginDegrees = 0.08f
     private val maxInnerHalfYaw = Layout.rightYaw - Layout.clearZoneDegrees -
         Layout.clearGapDegrees - roundingMarginDegrees
-    val statsHeightMeters = 2 * planeHalfSpan(5.9f)
+    private val statsBelowAnchor = planeHalfSpan(5.9f)
+    private val statsAboveAnchor = planeHalfSpan(7.8f)
+    val statsHeightMeters = statsBelowAnchor + statsAboveAnchor
     val statsWidthMeters = 2 * (Layout.distanceMeters * cos(radians(Layout.pitch)) -
-        statsHeightMeters / 2 * sin(radians(-Layout.pitch))) * tangent(maxInnerHalfYaw)
+        statsBelowAnchor * sin(radians(-Layout.pitch))) * tangent(maxInnerHalfYaw)
+
+    fun statsPose(): Pose {
+        val anchor = pose(Layout.leftYaw, Layout.pitch)
+        // Extend the panel upward along its plane, retaining the lower edge and anchor.
+        val centerOffset = (statsAboveAnchor - statsBelowAnchor) / 2
+        return Pose(anchor.translation + anchor.up * centerOffset, anchor.rotation)
+    }
 
     fun mapSizeMeters(diameter: Float): Float {
         val halfYaw = minOf(diameter / 2, maxInnerHalfYaw)
