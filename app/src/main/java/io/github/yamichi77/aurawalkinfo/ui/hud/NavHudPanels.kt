@@ -135,33 +135,15 @@ internal fun NavGuidanceContent(
 }
 
 @Composable
-internal fun BoxScope.DestinationMapControls(
+internal fun BoxScope.DestinationMapOverlay(
     prompt: DestinationPrompt,
-    navigationActive: Boolean,
     diameter: Dp,
-    edgeHitSize: Dp,
-    opacity: Float,
     enabled: Boolean,
     onTap: (HudTarget) -> Unit,
 ) {
-    if (!enabled) return
+    if (!enabled || prompt == DestinationPrompt.Map || prompt == DestinationPrompt.ConfirmEnd) return
     val primarySize = with(LocalDensity.current) { 16.dp.toSp() }
     val secondarySize = with(LocalDensity.current) { 14.dp.toSp() }
-    if (prompt == DestinationPrompt.Map || prompt == DestinationPrompt.ConfirmEnd) {
-        val label = when {
-            prompt == DestinationPrompt.ConfirmEnd && navigationActive -> "もう一度でナビ終了"
-            navigationActive -> "ナビ終了"
-            else -> "目的地"
-        }
-        Box(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth(0.55f).height(edgeHitSize).alpha(opacity),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(label, color = HudText, fontSize = secondarySize, lineHeight = secondarySize, maxLines = 1)
-            Box(Modifier.size(edgeHitSize).hudClick(HudTarget.NAV_DESTINATION, onTap))
-        }
-        return
-    }
     Column(
         Modifier.align(Alignment.Center).fillMaxWidth(0.72f),
         verticalArrangement = Arrangement.spacedBy(diameter * 0.012f),

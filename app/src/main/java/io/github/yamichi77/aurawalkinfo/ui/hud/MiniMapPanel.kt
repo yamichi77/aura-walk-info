@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,13 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -57,7 +53,6 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.Map3dSnapshotCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.saveProbePng
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
-import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -74,7 +69,6 @@ internal const val MAP_LOG_TAG = "AuraMap"
 private const val SNAPSHOT_FILE = "minimap-snapshot.png"
 private const val MAP_ZOOM = 17.5f
 private const val CAMERA_ANIMATION_MS = 500
-private val bigMapModeHitFraction = HudPlacement.planeHalfSpan(1.5f) * 2 / HudPlacement.bigMapSizeMeters
 
 internal fun centeredMapPadding(diameter: Dp) = PaddingValues(diameter * 0.15f)
 
@@ -172,7 +166,6 @@ internal fun ClickableMap(
     if (target == HudTarget.BIGMAP) {
         BoxWithConstraints(modifier) {
             val diameter = minOf(maxHeight, maxWidth)
-            val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
             val listening = enabled && spec.destinationPrompt is DestinationPrompt.Listening
             val mapOpacity = if (listening) 0.3f else spec.opacity
             MiniMapPanel(
@@ -186,23 +179,7 @@ internal fun ClickableMap(
                 bigMapMode = bigMapMode,
             )
             Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
-            Box(
-                Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = diameter * 0.01f)
-                    .size(diameter * bigMapModeHitFraction)
-                    .hudClick(HudTarget.BIGMAP_MODE, onTap, enabled),
-                contentAlignment = Alignment.Center,
-            ) {
-                val labelSize = with(LocalDensity.current) { 14.dp.toSp() }
-                Text(
-                    bigMapMode.toggleLabel, Modifier.alpha(opacity), color = HudText,
-                    fontSize = labelSize, lineHeight = labelSize, maxLines = 1,
-                )
-            }
-            DestinationMapControls(
-                spec.destinationPrompt, spec.navigation != null, diameter,
-                diameter * bigMapModeHitFraction, opacity, enabled, onTap,
-            )
+            DestinationMapOverlay(spec.destinationPrompt, diameter, enabled, onTap)
         }
     } else {
         Box(modifier) {

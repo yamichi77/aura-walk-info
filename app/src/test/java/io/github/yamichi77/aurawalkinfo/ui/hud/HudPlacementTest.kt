@@ -12,6 +12,39 @@ import kotlin.math.sin
 
 class HudPlacementTest {
     @Test
+    fun bigMapButtonHitPanelsClearTheCircleAndFitInFrontOfTheOutsidePanel() {
+        val map = HudPlacement.pose(0f, HudPlacement.bigMapPitch)
+        for (button in listOf(HudPlacement.bigMapDestinationButton, HudPlacement.bigMapModeButton)) {
+            val panel = button.pose()
+            val halfWidth = button.width / 2
+            val halfHeight = button.height / 2
+            val nearestY = button.centerY - kotlin.math.sign(button.centerY) * halfHeight
+            val nearest = map.transformPoint(Vector3(button.left, nearestY, 0f))
+            assertTrue(button.left > HudPlacement.bigMapSizeMeters / 2)
+            assertTrue(angle(map.translation, nearest) - HudPlacement.bigMapDiameter / 2 >= 1.0)
+            assertTrue(angle(panel.transformPoint(Vector3(-halfWidth, 0f, 0f)),
+                panel.transformPoint(Vector3(halfWidth, 0f, 0f))) >= 3.0)
+            assertTrue(angle(panel.transformPoint(Vector3(0f, -halfHeight, 0f)),
+                panel.transformPoint(Vector3(0f, halfHeight, 0f))) >= 3.0)
+            for (x in listOf(-halfWidth, halfWidth)) {
+                for (y in listOf(-halfHeight, halfHeight)) {
+                    val point = panel.transformPoint(Vector3(x, y, 0f))
+                    assertTrue(yaw(point) in 0.0..30.0)
+                    assertTrue(pitch(point) in -20.0..20.0)
+                    assertTrue(point.z > -1.65f)
+                }
+            }
+        }
+    }
+
+    private fun angle(first: Vector3, second: Vector3): Double {
+        val dot = first.x * second.x + first.y * second.y + first.z * second.z
+        return Math.toDegrees(kotlin.math.acos((dot / (first.length * second.length)).toDouble()))
+    }
+
+    private fun pitch(point: Vector3) = Math.toDegrees(atan2(point.y, hypot(point.x, point.z)).toDouble())
+
+    @Test
     fun everySkyMarkPanelFitsTheUpperBandAtBothEdgesAndInTheCenter() {
         for (kind in SkyMarkKind.entries) {
             val layout = skyMarkLayout(kind)

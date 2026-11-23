@@ -6,11 +6,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
@@ -55,9 +57,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.GraphicsMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NavigationHudTest {
     @get:Rule val compose = createComposeRule()
 
@@ -67,7 +71,9 @@ class NavigationHudTest {
         render(f)
         tap("map")
         text("目的地").assertIsDisplayed()
-        tap("nav_destination")
+        compose.onNodeWithTag("nav_destination").performTouchInput { click() }
+        compose.onNodeWithTag("bigmap").assertIsDisplayed()
+        compose.onNodeWithTag("nav_destination").assertDoesNotExist()
         text("話してください").assertIsDisplayed()
         text("合成の途中結果").assertIsDisplayed()
         compose.runOnIdle { f.recognized.complete(SpeechResult.Recognized("合成の検索語")) }
@@ -202,8 +208,16 @@ class NavigationHudTest {
         render(f)
         compose.runOnIdle { f.startGuidance() }
         tap("map")
+        text("ナビ終了").assertIsDisplayed()
         tap("nav_destination")
+        val layouts = mutableListOf<TextLayoutResult>()
         text("もう一度でナビ終了").assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val confirmation = layouts.single()
+        assertFalse(
+            "Confirmation label must fit within ${confirmation.layoutInput.constraints}",
+            confirmation.hasVisualOverflow,
+        )
         assertTrue(f.nav.state.value is NavState.Guiding)
         advance(f, 3_000)
         text("ナビ終了").assertIsDisplayed()

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
@@ -30,6 +32,7 @@ import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.hud.DebugAngleGrid
 import io.github.yamichi77.aurawalkinfo.ui.hud.ClickableMap
+import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapButton
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
 import io.github.yamichi77.aurawalkinfo.ui.hud.CountdownPanel
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
@@ -45,6 +48,7 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.gridHeightMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.gridWidthMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudClick
 import io.github.yamichi77.aurawalkinfo.ui.hud.rememberCountdownPresentation
+import io.github.yamichi77.aurawalkinfo.ui.hud.rememberBigMapDestinationLabel
 import io.github.yamichi77.aurawalkinfo.ui.hud.rememberHudQuantum
 
 @Composable
@@ -126,16 +130,29 @@ internal fun PhoneScreen(
         if (spec is HudVisualSpec.Clusters && !locationDenied &&
             (showBigMap || bigMapAlpha > 0f || bigMapQuantum != null)
         ) {
-            val mapModifier = Modifier.align(Alignment.Center).size(minOf(maxWidth, maxHeight) * 0.85f)
-            QuantumMap(
-                bigMapQuantum, large = true,
-                if (bigMapQuantum == null) mapModifier.alpha(bigMapAlpha) else mapModifier,
-            ) { presentationModifier ->
-                ClickableMap(
-                    spec, debug, HudTarget.BIGMAP, onTap, presentationModifier,
-                    enabled = showBigMap,
-                    bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * dpPerMeter).dp,
-                    bigMapMode = bigMapMode,
+            val buttonWidth = minOf(144.dp, maxWidth / 3)
+            val gap = 4.dp
+            val mapSize = minOf(maxHeight * 0.85f, maxWidth - buttonWidth - gap)
+            val fade = if (bigMapQuantum == null) bigMapAlpha else 1f
+            Box(Modifier.align(Alignment.Center).size(mapSize + gap + buttonWidth, mapSize).alpha(fade)) {
+                QuantumMap(bigMapQuantum, large = true, Modifier.size(mapSize)) { presentationModifier ->
+                    ClickableMap(
+                        spec, debug, HudTarget.BIGMAP, onTap, presentationModifier,
+                        enabled = showBigMap,
+                        bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * dpPerMeter).dp,
+                        bigMapMode = bigMapMode,
+                    )
+                }
+                val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
+                if (destinationLabel != null) BigMapButton(
+                    destinationLabel, HudTarget.NAV_DESTINATION, spec.opacity, bigMapQuantum, showBigMap,
+                    onTap, phoneMapButtonLayout(HudPlacement.bigMapDestinationButton, mapSize, gap, buttonWidth, 52.dp),
+                )
+                BigMapButton(
+                    bigMapMode.toggleLabel, HudTarget.BIGMAP_MODE, spec.opacity, bigMapQuantum, showBigMap,
+                    onTap, phoneMapButtonLayout(
+                        HudPlacement.bigMapModeButton, mapSize, gap, minOf(44.dp, buttonWidth), 40.dp,
+                    ),
                 )
             }
         }
@@ -149,4 +166,16 @@ internal fun PhoneScreen(
             )
         }
     }
+}
+
+private fun phoneMapButtonLayout(
+    placement: HudPlacement.BigMapButtonPlacement,
+    mapSize: Dp,
+    gap: Dp,
+    width: Dp,
+    minHeight: Dp,
+): Modifier {
+    val height = maxOf(minHeight, mapSize * (placement.height / HudPlacement.bigMapSizeMeters))
+    val y = mapSize * (0.5f - placement.centerY / HudPlacement.bigMapSizeMeters) - height / 2
+    return Modifier.offset(x = mapSize + gap, y = y).size(width, height)
 }

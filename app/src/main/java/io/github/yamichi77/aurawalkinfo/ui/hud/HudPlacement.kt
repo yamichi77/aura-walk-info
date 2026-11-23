@@ -52,6 +52,22 @@ internal object HudPlacement {
     const val bigMapPitch = -4f
     const val bigMapDiameter = 28f
     val bigMapSizeMeters = 2 * planeHalfSpan(bigMapDiameter / 2)
+    // Keep the entire hit panel beside the map surface, including its rectangular bounds.
+    private val bigMapButtonLeft = planeHalfSpan(14.3f)
+    val bigMapDestinationButton = BigMapButtonPlacement(2 * planeHalfSpan(5f), planeHalfSpan(9f))
+    val bigMapModeButton = BigMapButtonPlacement(2 * planeHalfSpan(2f), -planeHalfSpan(9f))
+
+    internal class BigMapButtonPlacement(val width: Float, val centerY: Float) {
+        val height = 2 * planeHalfSpan(2.2f)
+        val left = bigMapButtonLeft
+
+        fun pose(): Pose {
+            val map = HudPlacement.pose(0f, bigMapPitch)
+            val center = map.transformPoint(Vector3(left + width / 2, centerY, 0f))
+            return Pose(center, map.rotation)
+        }
+    }
+
     val countdownWidthMeters = 2 * planeHalfSpan(8f)
     val countdownHeightMeters = 2 * planeHalfSpan(7f)
     val countdownDigitHeightMeters = 2 * planeHalfSpan(2f)

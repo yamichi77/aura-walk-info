@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -129,16 +130,22 @@ class QuantumHudTest {
         settle()
         noEffects()
         tag("bigmap").assertIsDisplayed()
+        tag("nav_destination").assertIsDisplayed()
+        tag("bigmap_mode").assertIsDisplayed()
         tag("map").assertDoesNotExist()
 
         tag("bigmap").performClick()
         frames()
         effect("bigmap")
         effect("map")
+        tag("nav_destination").assertIsNotEnabled()
+        tag("bigmap_mode").assertIsNotEnabled()
         settle()
         noEffects()
         tag("map").assertIsDisplayed()
         tag("bigmap").assertDoesNotExist()
+        tag("nav_destination").assertDoesNotExist()
+        tag("bigmap_mode").assertDoesNotExist()
 
         tag("map").performClick()
         frames()
