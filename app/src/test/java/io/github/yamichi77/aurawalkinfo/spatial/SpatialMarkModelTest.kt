@@ -16,6 +16,7 @@ import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.time.Duration
+import kotlin.math.atan
 import kotlin.math.tan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -83,6 +84,23 @@ class SpatialMarkModelTest {
         assertTrue(triangles.all { view.elevation(it) >= 5.0 })
         assertTrue(triangles.any { view.elevation(it) in 5.0..5.01 })
         assertEquals(38.4, triangles.maxOf { it.y }, 1e-6)
+    }
+
+    @Test fun strokeThicknessAndArrowSizeMeetAngularMinimumsAcrossDistances() {
+        fun angle(size: Double, distance: Double) = Math.toDegrees(2.0 * atan(size / (2.0 * distance)))
+        for (distance in listOf(10.0, 40.0, 100.0)) {
+            val center = eye + north * distance
+            val arrow = markStrokes(MarkKind.TURN, center, north, MarkVector.UP, eye)
+            val pillar = markStrokes(MarkKind.DESTINATION, center, north, MarkVector.UP, eye)
+            for (stroke in arrow + pillar) {
+                val far = maxOf((stroke.start - eye).length(), (stroke.end - eye).length())
+                assertTrue("Stroke at ${distance}m", angle(stroke.width, far) >= 0.15 - 1e-9)
+            }
+            val arrowPoints = arrow.map { it.start }
+            val width = arrowPoints.maxOf { it.x } - arrowPoints.minOf { it.x }
+            val far = arrowPoints.maxOf { (it - eye).length() }
+            assertTrue("Arrow at ${distance}m", angle(width, far) >= 3.0 - 1e-9)
+        }
     }
 
     @Test fun segmentCanEnterAndLeaveTheVisibleConeWithBothEndsBelowFiveDegrees() {

@@ -295,7 +295,7 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
             signalPanel = SignalTotemPanel(session, context, parent)
             return
         }
-        val created = SpatialMarkMesh(kind)
+        val created = SpatialMarkMesh(kind.strokeCounts)
         mesh = created
         created.initialize(session, parent)
     }
@@ -400,7 +400,7 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
         if (key == clipKey) return checkNotNull(lastClip)
         val (center, forward, up, view) = key
         val right = forward.cross(up)
-        val strokes = markStrokes(kind, center, forward, up)
+        val strokes = markStrokes(kind, center, forward, up, view.eye)
         val geometry = listOf(strokes.flatMap { it.clippedTriangles(view, up, right) })
         val result = ClippedMark(geometry, strokes, center, view)
         clipKey = key

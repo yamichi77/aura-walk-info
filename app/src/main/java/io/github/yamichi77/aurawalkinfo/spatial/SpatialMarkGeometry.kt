@@ -2,6 +2,15 @@ package io.github.yamichi77.aurawalkinfo.spatial
 
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.tan
+
+internal const val MIN_STROKE_ANGLE_DEGREES = 0.15
+internal const val MIN_ARROW_ANGLE_DEGREES = 3.0
+private const val ARROW_WIDTH_METERS = 2.0
+private const val ARROW_RADIUS_METERS = 1.25
+
+private fun metersForAngle(distance: Double, angleDegrees: Double): Double =
+    2.0 * distance * tan(Math.toRadians(angleDegrees) / 2.0)
 
 internal data class MarkStroke(val start: MarkVector, val end: MarkVector, val width: Double)
 
@@ -10,6 +19,7 @@ internal fun markStrokes(
     center: MarkVector,
     forward: MarkVector,
     up: MarkVector,
+    eye: MarkVector,
 ): List<MarkStroke> {
     val right = forward.cross(up)
     fun point(x: Double, y: Double, z: Double) = center + right * x + up * y + forward * z
@@ -22,14 +32,18 @@ internal fun markStrokes(
             origin + horizontal * (radius * cos(angle)) + vertical * (radius * sin(angle))
         }, width)
 
-    return when (kind) {
+    val strokes = when (kind) {
         MarkKind.TURN -> {
+            // Include the reach of the scaled arrow in the distance used for sizing.
+            val widthPerMeter = metersForAngle(1.0, MIN_ARROW_ANGLE_DEGREES)
+            val scale = maxOf(1.0, widthPerMeter * (center - eye).length() /
+                (ARROW_WIDTH_METERS - widthPerMeter * ARROW_RADIUS_METERS))
             val outline = listOf(
                 0.0 to 1.2, 1.0 to 0.15, 0.36 to 0.15, 0.36 to -1.0,
                 -0.36 to -1.0, -0.36 to 0.15, -1.0 to 0.15,
             )
-            val top = outline.map { (x, z) -> point(x, 0.18, z) }
-            val bottom = outline.map { (x, z) -> point(x, -0.18, z) }
+            val top = outline.map { (x, z) -> point(x * scale, 0.18 * scale, z * scale) }
+            val bottom = outline.map { (x, z) -> point(x * scale, -0.18 * scale, z * scale) }
             loop(top, 0.035) + loop(bottom, 0.035) + top.zip(bottom) { a, b -> MarkStroke(a, b, 0.035) }
         }
         MarkKind.DESTINATION -> {
@@ -37,6 +51,11 @@ internal fun markStrokes(
             listOf(MarkStroke(center, top, 0.3)) + ring(right, forward, top, 0.6, 0.06, 16)
         }
         MarkKind.SIGNAL -> error("Signal totems use a panel")
+    }
+    return strokes.map { stroke ->
+        // The farthest point of a line segment from the eye is one of its endpoints.
+        val distance = maxOf((stroke.start - eye).length(), (stroke.end - eye).length())
+        stroke.copy(width = maxOf(stroke.width, metersForAngle(distance, MIN_STROKE_ANGLE_DEGREES)))
     }
 }
 
