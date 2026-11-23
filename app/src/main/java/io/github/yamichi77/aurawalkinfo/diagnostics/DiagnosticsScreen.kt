@@ -32,6 +32,10 @@ import androidx.xr.compose.subspace.layout.size
 
 @Composable
 internal fun DiagnosticsScreen(activity: ComponentActivity, mode: String, capture: Boolean) {
+    if (mode == "map3d") {
+        Map3dProbe()
+        return
+    }
     val caps = LocalSpatialCapabilities.current
     if (mode == "probe") {
         val lines = remember { mutableStateListOf<String>() }

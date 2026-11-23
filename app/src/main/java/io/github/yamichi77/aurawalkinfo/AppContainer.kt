@@ -28,6 +28,7 @@ import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionInput
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionRepository
 import io.github.yamichi77.aurawalkinfo.session.sessionTicks
+import io.github.yamichi77.aurawalkinfo.settings.HudSettings
 import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import java.io.File
 import java.io.IOException
@@ -48,6 +49,7 @@ class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     private val clock = Clock(SystemClock::elapsedRealtime)
     internal val wallClock = WallClock { ZonedDateTime.now() }
+    internal val hudSettings = HudSettings(appContext)
     private val locationProvider: LocationRepository by lazy {
         if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(appContext) ==
             ConnectionResult.SUCCESS

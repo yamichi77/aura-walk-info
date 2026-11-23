@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -136,6 +138,46 @@ class MainActivityWalkTest {
         Robolectric.buildActivity(MainActivity::class.java, intent).setup().use {
             assertEquals(WalkPhase.Standby, ViewModelProvider(it.get())[HudControls::class.java].phase)
             assertFalse(shadowOf(app).registeredReceivers.any { it.intentFilter.hasAction(DEBUG_TAP_ACTION) })
+        }
+    }
+
+    @Test
+    fun bigMapSwitchKeepsItsDeadlineAndPersistsAcrossReopenAndNewActivity() {
+        val app = ApplicationProvider.getApplicationContext<AuraWalkApplication>()
+        app.applicationInfo.flags = app.applicationInfo.flags or ApplicationInfo.FLAG_DEBUGGABLE
+        val intent = Intent(app, MainActivity::class.java).putExtra("fakeState", "stopped")
+        val main = shadowOf(Looper.getMainLooper())
+        val mini = compose.onNodeWithTag("map")
+        val big = compose.onNodeWithTag("bigmap")
+        val toggle = compose.onNodeWithTag("bigmap_mode")
+        val show3d = compose.onNode(hasTestTag("bigmap_mode") and hasText("3D"))
+        val show2d = compose.onNode(hasTestTag("bigmap_mode") and hasText("2D"))
+        Robolectric.buildActivity(MainActivity::class.java, intent).setup().use { controller ->
+            val controls = ViewModelProvider(controller.get())[HudControls::class.java]
+            mini.assertIsDisplayed().performClick()
+            show3d.assertIsDisplayed()
+            val deadline = controls.map.closesAt
+            main.idleFor(Duration.ofSeconds(2))
+            toggle.performTouchInput { click() }
+            show2d.assertIsDisplayed()
+            big.assertIsDisplayed()
+            assertEquals(deadline, controls.map.closesAt)
+            compose.onNodeWithTag("quantum-bigmap").assertDoesNotExist()
+            big.performTouchInput { click() }
+            toggle.assertDoesNotExist()
+            mini.assertIsDisplayed().performClick()
+            show2d.assertIsDisplayed()
+            main.idleFor(Duration.ofSeconds(30))
+            show2d.assertDoesNotExist()
+            mini.assertIsDisplayed()
+        }
+        Robolectric.buildActivity(MainActivity::class.java, intent).setup().use {
+            mini.assertIsDisplayed()
+            toggle.assertDoesNotExist()
+            mini.performClick()
+            show2d.assertIsDisplayed()
+            toggle.performTouchInput { click() }
+            show3d.assertIsDisplayed()
         }
     }
 }

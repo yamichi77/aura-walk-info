@@ -29,6 +29,7 @@ import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.hud.DebugAngleGrid
 import io.github.yamichi77.aurawalkinfo.ui.hud.ClickableMap
+import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
 import io.github.yamichi77.aurawalkinfo.ui.hud.CountdownPanel
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudPlacement
@@ -54,6 +55,7 @@ internal fun PhoneScreen(
     quantumEnabled: Boolean = QuantumEffectsEnabled,
     quantumStartup: HudQuantumStartup = remember { HudQuantumStartup() },
     wallClock: WallClock? = null,
+    bigMapMode: BigMapMode = BigMapMode.FLAT,
     onTap: (HudTarget) -> Unit,
 ) {
     val allMapsVisible = !locationDenied && spec is HudVisualSpec.Clusters
@@ -124,6 +126,7 @@ internal fun PhoneScreen(
                     spec, debug, HudTarget.BIGMAP, onTap, presentationModifier,
                     enabled = showBigMap,
                     bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * dpPerMeter).dp,
+                    bigMapMode = bigMapMode,
                 )
             }
         }
