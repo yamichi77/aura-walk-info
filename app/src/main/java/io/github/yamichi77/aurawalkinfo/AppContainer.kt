@@ -32,7 +32,6 @@ import io.github.yamichi77.aurawalkinfo.session.WalkSessionRepository
 import io.github.yamichi77.aurawalkinfo.session.sessionTicks
 import io.github.yamichi77.aurawalkinfo.settings.HudSettings
 import io.github.yamichi77.aurawalkinfo.ui.WallClock
-import io.github.yamichi77.aurawalkinfo.ui.hud.PicsReferenceNotice
 import java.io.File
 import java.io.IOException
 import java.time.ZonedDateTime
@@ -105,7 +104,6 @@ class AppContainer(context: Context) {
     private val inputs = replay?.inputs ?: flowOf(realInput)
     val walkSessionRepository = WalkSessionRepository(inputs, androidDistanceCalculator)
     internal val picsReceiver = PicsReceiver(appContext, clock, debuggable)
-    internal val picsReferenceNotice = PicsReferenceNotice(clock)
     val navRepository = NavRepository(navScope, androidNavService(appContext), permissionGatedLocation.locations, clock)
     val safetyNotice = SafetyNotice(appContext)
 

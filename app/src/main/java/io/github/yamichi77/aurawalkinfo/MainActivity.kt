@@ -16,7 +16,6 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,7 +53,6 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
-import io.github.yamichi77.aurawalkinfo.ui.hud.LocalPicsReferenceNotice
 import io.github.yamichi77.aurawalkinfo.ui.hud.SkyBandTargets
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
 import io.github.yamichi77.aurawalkinfo.ui.hud.isDestinationInput
@@ -209,14 +207,14 @@ class MainActivity : ComponentActivity() {
                 } else {
                     val state by repository.state.collectAsStateWithLifecycle()
                     val pics by container.picsReceiver.candidate.collectAsStateWithLifecycle()
+                    val displayedState = debug.fakeState ?: state
                     val denied = !locationGranted && debug.fakeState == null
                     val navState by container.navRepository.state.collectAsStateWithLifecycle()
                     val skyBandSettings = rememberSkyBandSettings(container.hudSettings)
                     val spec = hudVisualSpecFor(
-                        debug.fakeState ?: state, noticePending = visibility.noticePending,
+                        displayedState, noticePending = visibility.noticePending,
                         phase = controls.phase, countdown = controls.seconds,
                         startingFromSummary = controls.startingFromSummary,
-                        pics = pics.takeUnless { denied },
                         navState = navState, destinationPrompt = destinationInput.prompt,
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
@@ -236,32 +234,29 @@ class MainActivity : ComponentActivity() {
                             Log.i("AuraHud", "route=$route")
                         }
                     }
-                    CompositionLocalProvider(LocalPicsReferenceNotice provides container.picsReferenceNotice) {
-                        if (spatial) {
-                            if (headTrackingGranted) {
-                                SpatialMarks(
-                                    debug.fakeState ?: state, navState,
-                                    pics.takeIf { (spec as? HudVisualSpec.Clusters)?.pics != null },
-                                    skyBandSettings, container.headingTracking, spatialAnchorGranted,
-                                    denied, debugBuild,
-                                )
-                                HudScene(
-                                    spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                                    controls.quantumStartup, container.wallClock, bigMapMode, onTap,
-                                    skyBandSettings, container.headingTracking,
-                                    SkyBandTargets.from(
-                                        navState,
-                                        pics.takeIf { (spec as? HudVisualSpec.Clusters)?.pics != null },
-                                    ),
-                                )
-                            }
-                        } else {
-                            PhoneScreen(
+                    val signal = pics.takeIf {
+                        !denied && !visibility.noticePending && displayedState.motionState == MotionState.STOPPED
+                    }
+                    if (spatial) {
+                        if (headTrackingGranted) {
+                            SpatialMarks(
+                                displayedState, navState, signal,
+                                skyBandSettings, container.headingTracking, spatialAnchorGranted,
+                                denied, debugBuild,
+                            )
+                            HudScene(
                                 spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                                quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
-                                bigMapMode = bigMapMode, onTap = onTap,
+                                controls.quantumStartup, container.wallClock, bigMapMode, onTap,
+                                skyBandSettings, container.headingTracking,
+                                SkyBandTargets.from(navState, signal),
                             )
                         }
+                    } else {
+                        PhoneScreen(
+                            spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
+                            quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
+                            bigMapMode = bigMapMode, onTap = onTap,
+                        )
                     }
                 }
             }

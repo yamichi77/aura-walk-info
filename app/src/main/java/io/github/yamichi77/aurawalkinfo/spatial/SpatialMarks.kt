@@ -1,5 +1,6 @@
 package io.github.yamichi77.aurawalkinfo.spatial
 
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.Composable
@@ -9,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -27,11 +29,8 @@ import io.github.yamichi77.aurawalkinfo.heading.HeadingEstimator
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavState
-import io.github.yamichi77.aurawalkinfo.pics.PicsAspect
 import io.github.yamichi77.aurawalkinfo.pics.PicsCandidate
-import io.github.yamichi77.aurawalkinfo.pics.PicsFreshness
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
-import io.github.yamichi77.aurawalkinfo.ui.hud.picsDotColor
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -40,11 +39,7 @@ import kotlinx.coroutines.launch
 
 internal const val SCENE_UNDERSTANDING_COARSE = "androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE"
 private const val TAG = "AuraSpatial"
-private val MarkColor = Color(0xFF7FDBFF)
-private val SignalPalette = listOf(
-    MarkColor, picsDotColor(false, PicsAspect.NONE),
-    picsDotColor(true, PicsAspect.RED), picsDotColor(true, PicsAspect.GREEN),
-)
+private val MarkColors = listOf(Color(0xFF7FDBFF))
 
 @Composable
 internal fun SpatialMarks(
@@ -58,6 +53,7 @@ internal fun SpatialMarks(
     debug: Boolean,
 ) {
     val session = LocalSession.current
+    val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val current = remember(state.mapCenter, locationDenied) {
         state.mapCenter?.takeIf {
@@ -70,10 +66,10 @@ internal fun SpatialMarks(
     val fix by rememberUpdatedState(current)
     val walk by rememberUpdatedState(state)
     val hasTargets by rememberUpdatedState(nav is NavState.Guiding || nav is NavState.Rerouting || signal != null)
-    LaunchedEffect(session, owner, settings, heading, anchorGranted, debug) {
+    LaunchedEffect(session, context, owner, settings, heading, anchorGranted, debug) {
         if (session == null) return@LaunchedEffect
         owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            val scene = SpatialMarkScene(session, debug)
+            val scene = SpatialMarkScene(session, context, debug)
             if (debug) launch {
                 snapshotFlow { settings.northOverride }.collectLatest { override ->
                     if (override == null) return@collectLatest
@@ -89,8 +85,12 @@ internal fun SpatialMarks(
                 var fixEye: Vector3? = null
                 var lastEye: Vector3? = null
                 var nextPositionAt = 0L
-                snapshotFlow { spatialUpdateMode(hasTargets, settings.spatialMarksEnabled, walk.motionState) }
-                    .collectLatest { mode ->
+                snapshotFlow {
+                    // Reevaluate signal eligibility immediately even while the navigation marks stay active.
+                    spatialUpdateMode(hasTargets, settings.spatialMarksEnabled, walk.motionState) to
+                        decisions?.get(MarkKind.SIGNAL.ordinal)?.target?.signal?.intersectionId
+                }
+                    .collectLatest { (mode, _) ->
                         if (mode == SpatialUpdateMode.FAST) {
                             scene.draw(MarkReason.FAST, decisions, null, SystemClock.elapsedRealtime())
                             return@collectLatest
@@ -160,7 +160,11 @@ internal fun SpatialMarks(
     }
 }
 
-private class SpatialMarkScene(private val session: Session, private val debug: Boolean) : AutoCloseable {
+private class SpatialMarkScene(
+    private val session: Session,
+    private val context: Context,
+    private val debug: Boolean,
+) : AutoCloseable {
     private val marks = MarkKind.entries.map(::SceneMark)
     private var anchor: Anchor? = null
     private var anchorSpace: AnchorSpace? = null
@@ -193,7 +197,7 @@ private class SpatialMarkScene(private val session: Session, private val debug: 
             // All suspending XR resource creation finishes before any mark can be visible.
             val parent = checkNotNull(anchorSpace)
             try {
-                marks.forEach { it.prepare(session, parent) }
+                marks.forEach { it.prepare(session, context, parent) }
             } catch (cancelled: CancellationException) {
                 // A change in update mode can cancel construction before the mesh is ready.
                 close()
@@ -239,6 +243,8 @@ private class SpatialMarkScene(private val session: Session, private val debug: 
 
 private class SceneMark(val kind: MarkKind) : AutoCloseable {
     private var mesh: SpatialMarkMesh? = null
+    private var signalPanel: SignalTotemPanel? = null
+    private var lastShownSignal: SignalTotem? = null
     private var target: MarkTarget? = null
     private var position: SmoothedMarkPosition? = null
     private var forward = MarkVector(0.0, 0.0, -1.0)
@@ -248,12 +254,15 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
     private var lastView: MarkView? = null
     private var clipKey: ClipKey? = null
     private var lastClip: ClippedMark? = null
-    private val palette = if (kind == MarkKind.SIGNAL) SignalPalette else listOf(MarkColor)
     var opacity = 0f
         private set
     val isFading get() = fade.isAnimating
 
-    suspend fun prepare(session: Session, parent: AnchorSpace) {
+    suspend fun prepare(session: Session, context: Context, parent: AnchorSpace) {
+        if (kind == MarkKind.SIGNAL) {
+            signalPanel = SignalTotemPanel(session, context, parent)
+            return
+        }
         val created = SpatialMarkMesh(kind)
         mesh = created
         created.initialize(session, parent)
@@ -275,13 +284,19 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
         val center = position?.at(now)
         val stored = target
         val compatible = sameMark(stored, requested)
-        val signal = (if (compatible) requested else stored)?.signal
+        if (kind == MarkKind.SIGNAL) {
+            drawSignal(reason, requested?.signal?.takeIf { compatible }, center, view, now, debug)
+            if (reason == MarkReason.FAST) {
+                target = null
+                position = null
+            }
+            return
+        }
         val usableView = view ?: lastView
         if (view != null) lastView = view
         val clipped = if (reason == MarkReason.FAST || center == null || stored == null || usableView == null) null
             else if (reason == MarkReason.SHOW || opacity > 0f || reason != lastReason) {
-                val dotColors = signal?.lights.orEmpty().map { picsDotColor(signal?.freshness == PicsFreshness.FRESH, it.aspect) }
-                clipMark(ClipKey(center, forward, up, usableView, dotColors))
+                clipMark(ClipKey(center, forward, up, usableView))
             } else null
 
         val actual = when {
@@ -291,7 +306,7 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
             else -> MarkReason.SHOW
         }
         opacity = fade.update(actual == MarkReason.SHOW, reason == MarkReason.FAST, now)
-        mesh?.draw(clipped?.geometry.orEmpty(), palette, opacity)
+        mesh?.draw(clipped?.geometry.orEmpty(), MarkColors, opacity)
         if (debug && actual != lastReason) {
             val data = clipped ?: lastClip
             val range = data?.elevationRange()
@@ -310,16 +325,48 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
         }
     }
 
+    private fun drawSignal(
+        reason: MarkReason,
+        signal: PicsCandidate?,
+        center: MarkVector?,
+        view: MarkView?,
+        now: Long,
+        debug: Boolean,
+    ) {
+        val actual = when {
+            reason != MarkReason.SHOW -> reason
+            signal == null || center == null || view == null || signalPanel == null -> MarkReason.ANCHOR_UNAVAILABLE
+            else -> MarkReason.SHOW
+        }
+        opacity = fade.signalOpacity(actual, now)
+        if (opacity > 0f && signal != null && center != null && view != null) {
+            val totem = signal.toSignalTotem()
+            val placement = placeSignalTotem(center, view.eye, view.up, totem.heightMeters)
+            signalPanel?.draw(totem, placement, view.up, forward, opacity)
+            if (debug && lastShownSignal != totem) {
+                val bottom = placement.center - view.up * (totem.heightMeters / 2)
+                val aspects = totem.rows.joinToString(",") { it.aspect.name }
+                val segments = totem.rows.joinToString(",") { it.segments.toString() }
+                Log.i(TAG, "SHOW mark=SIGNAL reason=SHOW phase=${totem.freshness} rows=${totem.rows.size} " +
+                    "aspects=$aspects segments=$segments bottomElevationDeg=${view.elevation(bottom).diagnostic()}")
+            }
+            lastShownSignal = totem
+        } else {
+            signalPanel?.hide()
+            if (debug && actual != MarkReason.SHOW && (actual != lastReason || lastShownSignal != null)) {
+                Log.i(TAG, "HIDE mark=SIGNAL reason=$actual")
+            }
+            lastShownSignal = null
+        }
+        lastReason = actual
+    }
+
     private fun clipMark(key: ClipKey): ClippedMark {
         if (key == clipKey) return checkNotNull(lastClip)
-        val (center, forward, up, view, dotColors) = key
+        val (center, forward, up, view) = key
         val right = forward.cross(up)
-        val strokes = markStrokes(kind, center, forward, up, dotColors.size)
-        val geometry = List(palette.size) { mutableListOf<MarkVector>() }
-        strokes.forEachIndexed { index, group ->
-            val slot = if (index == 0) 0 else palette.indexOf(dotColors[index - 1])
-            group.forEach { geometry[slot].addAll(it.clippedTriangles(view, up, right)) }
-        }
+        val strokes = markStrokes(kind, center, forward, up)
+        val geometry = listOf(strokes.flatMap { it.clippedTriangles(view, up, right) })
         val result = ClippedMark(geometry, strokes, center, view)
         clipKey = key
         lastClip = result
@@ -329,6 +376,9 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
     override fun close() {
         mesh?.close()
         mesh = null
+        signalPanel?.close()
+        signalPanel = null
+        lastShownSignal = null
         target = null
         position = null
         fade = MarkFade()
@@ -340,17 +390,17 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
 }
 
 private data class ClipKey(
-    val center: MarkVector, val forward: MarkVector, val up: MarkVector, val view: MarkView, val dotColors: List<Color>,
+    val center: MarkVector, val forward: MarkVector, val up: MarkVector, val view: MarkView,
 )
 
 private class ClippedMark(
-    val geometry: List<List<MarkVector>>, private val strokes: List<List<MarkStroke>>,
+    val geometry: List<List<MarkVector>>, private val strokes: List<MarkStroke>,
     private val center: MarkVector, private val view: MarkView,
 ) {
     val distance get() = (center - view.eye).length()
 
     fun elevationRange(): Pair<Double, Double> {
-        val points = geometry.flatten().ifEmpty { strokes.flatten().flatMap { listOf(it.start, it.end) } }
+        val points = geometry.flatten().ifEmpty { strokes.flatMap { listOf(it.start, it.end) } }
         return points.minOf(view::elevation) to points.maxOf(view::elevation)
     }
 }

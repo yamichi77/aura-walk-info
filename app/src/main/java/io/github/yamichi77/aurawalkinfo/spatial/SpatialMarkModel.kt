@@ -6,7 +6,6 @@ import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavState
 import io.github.yamichi77.aurawalkinfo.nav.bearingTo
 import io.github.yamichi77.aurawalkinfo.nav.distanceTo
-import io.github.yamichi77.aurawalkinfo.pics.MAX_PICS_LIGHTS
 import io.github.yamichi77.aurawalkinfo.pics.PicsCandidate
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.ui.hud.outgoingBearing
@@ -62,7 +61,7 @@ private fun directionInPerception(bearing: Double, northOffset: Double): MarkVec
 internal enum class MarkKind(val baseHeight: Double, val strokeCounts: List<Int>) {
     TURN(7.0, listOf(21)),
     DESTINATION(8.0, listOf(17)),
-    SIGNAL(7.0, listOf(16, MAX_PICS_LIGHTS * 8, MAX_PICS_LIGHTS * 8, MAX_PICS_LIGHTS * 8)),
+    SIGNAL(SIGNAL_HEIGHT_METERS, emptyList()),
 }
 
 internal enum class MarkReason {
@@ -206,7 +205,7 @@ internal class MarkFade {
 internal const val MIN_MARK_ELEVATION_DEGREES = 5.0
 private val MIN_ELEVATION_SLOPE = tan(Math.toRadians(MIN_MARK_ELEVATION_DEGREES))
 
-internal data class MarkView(val eye: MarkVector, private val up: MarkVector) {
+internal data class MarkView(val eye: MarkVector, val up: MarkVector) {
     private fun horizontal(delta: MarkVector, rise: Double) = sqrt((delta.dot(delta) - rise * rise).coerceAtLeast(0.0))
 
     fun elevation(point: MarkVector): Double {

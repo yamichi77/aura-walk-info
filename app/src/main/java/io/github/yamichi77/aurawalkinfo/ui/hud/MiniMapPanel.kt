@@ -124,7 +124,7 @@ internal fun MiniMapPanel(
     }
 
     BoxWithConstraints(modifier) {
-        val camera = if (center != null && hasKey) {
+        if (center != null && hasKey) {
             val position = bigMapMode?.cameraPosition(center) ?: northUpCameraPosition(center, MAP_ZOOM)
             if (selfCheck) {
                 LaunchedEffect(position) {
@@ -142,13 +142,11 @@ internal fun MiniMapPanel(
                 camera = camera,
                 onRouteProjection = { project = it },
             )
-            camera
-        } else null
+        }
         if (route != null) (routeProjection ?: project)?.let {
             NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize())
         }
         MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
-        if (camera != null) PicsIntersectionLayer(spec, camera, bigMapMode, mapOpacity)
     }
 }
 

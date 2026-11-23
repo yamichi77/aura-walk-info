@@ -674,18 +674,18 @@ check_spatial() {
     if start_run spatial-pics -W --es fakeState stopped --ez selfcheck true &&
         wait_for_safety_log 'AuraSpatial[[:space:]]*: SETTINGS ready' 5 &&
         wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5; then
-        echo 'spatial: 今から10秒、頭を正面に向けたまま信号機の印を確認してください。'
+        echo 'spatial: 今から10秒、頭を正面に向けたまま番号・状態の丸と文字・ゲージ・「参考表示」が並ぶ信号の柱を確認してください。'
         deadline=$((SECONDS + 10))
         if sky_settings --ez spatial_marks true && spatial_align_north 0 &&
             pics_scenario spatial &&
-            wait_for_safety_log 'AuraSpatial[[:space:]]*: SHOW mark=SIGNAL reason=SHOW ' 5; then
-            record PASS 'spatial 信号機の印'
+            wait_for_safety_log 'AuraSpatial[[:space:]]*: SHOW mark=SIGNAL reason=SHOW phase=FRESH rows=2 aspects=RED,GREEN segments=3,8 bottomElevationDeg=(-0\.00|[0-9]+\.[0-9]+)' 5; then
+            record PASS 'spatial 信号の柱（2灯器・目線以上）'
         else
-            record FAIL 'spatial 信号機の印'
+            record FAIL 'spatial 信号の柱（2灯器・目線以上）'
         fi
         if (( SECONDS < deadline )); then sleep "$((deadline - SECONDS))"; fi
         echo 'spatial: 終わり（信号機）'
-        if wait_for_safety_log 'AuraSpatial[[:space:]]*: HIDE mark=SIGNAL reason=NO_SIGNAL ' 5 'AuraSpatial.*SHOW mark=SIGNAL'; then
+        if wait_for_safety_log 'AuraSpatial[[:space:]]*: HIDE mark=SIGNAL reason=NO_SIGNAL[[:space:]]*$' 5 'AuraSpatial.*SHOW mark=SIGNAL.*phase=STALE'; then
             record PASS 'spatial 信号の受信途絶で消去'
         else
             record FAIL 'spatial 信号の受信途絶で消去'
@@ -808,9 +808,26 @@ pics_scenario() {
 
 check_pics() {
     local args=(-W --es fakeState stopped)
-    if $preview; then args+=(--ez preview2d true); fi
+    local original_marks= totem_ready=false
+    if $preview; then
+        args+=(--ez preview2d true)
+    else
+        args+=(--ez selfcheck true)
+        if ! adb_retry shell pm grant "$pkg" androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
+            record FAIL 'pics 空間アンカーの権限'
+        fi
+    fi
     run_log=
-    start_run t17b-pics "${args[@]}" || return 0
+    start_run t24-pics "${args[@]}" || return 0
+    if ! $preview && wait_for_safety_log 'AuraSpatial[[:space:]]*: SETTINGS ready enabled=(true|false)' 5; then
+        original_marks=$(sed -n 's/.*AuraSpatial[[:space:]]*: SETTINGS ready enabled=\(true\|false\).*/\1/p' <<< "$run_log" | tail -n 1)
+        # Prepare the anchor before replaying the short signal phases.
+        if sky_settings --ez spatial_marks true && spatial_align_north 0 &&
+            pics_scenario stale &&
+            wait_for_safety_log 'AuraSpatial[[:space:]]*: SHOW mark=SIGNAL reason=SHOW ' 5; then
+            totem_ready=true
+        fi
+    fi
     if wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5 &&
         pics_scenario red_to_green &&
         wait_for_safety_log 'AuraPics[[:space:]]*: PICS scenario=red_to_green phase=HIDDEN' 9 &&
@@ -827,17 +844,28 @@ check_pics() {
     else
         record FAIL 'pics 赤から青への遷移と受信途絶後の失効'
     fi
-    if grep -Eq 'AuraPics[[:space:]]*: PICS display phase=FRESH text=信号は参考表示です$' <<< "$run_log" &&
-        grep -Eq 'AuraPics[[:space:]]*: PICS display phase=STALE text=信号は参考表示です$' <<< "$run_log" &&
-        pics_scenario stale &&
-        wait_for_safety_log 'AuraPics[[:space:]]*: PICS display phase=STALE text=信号 赤3$' 7 &&
-        grep -Eq 'AuraPics[[:space:]]*: PICS display phase=FRESH text=信号 赤3$' <<< "$run_log"; then
-        record PASS 'pics 初回の参考表示と信号行の鮮度'
+    if $preview; then
+        record SKIP 'pics 信号の柱（装着が必要）'
+    elif $totem_ready &&
+        wait_for_safety_log 'AuraSpatial[[:space:]]*: HIDE mark=SIGNAL reason=NO_SIGNAL[[:space:]]*$' 4 'AuraSpatial.*SHOW mark=SIGNAL.*phase=STALE rows=1 aspects=GREEN segments=8 ' &&
+        awk '
+            /AuraSpatial.*SHOW mark=SIGNAL.*phase=FRESH rows=1 aspects=RED segments=1 / { red = 1 }
+            /AuraSpatial.*SHOW mark=SIGNAL.*phase=FRESH rows=1 aspects=FLASHING_GREEN segments=1 / && red { flashing = 1 }
+            /AuraSpatial.*SHOW mark=SIGNAL.*phase=FRESH rows=1 aspects=GREEN segments=8 / && flashing { green = 1 }
+            /AuraSpatial.*SHOW mark=SIGNAL.*phase=STALE rows=1 aspects=GREEN segments=8 / && green { stale = 1 }
+            /AuraSpatial.*HIDE mark=SIGNAL reason=NO_SIGNAL/ && stale { hidden = 1 }
+            END { exit !hidden }
+        ' <<< "$run_log"; then
+        record PASS 'pics 信号の柱の状態・ゲージ・鮮度'
     else
-        record FAIL 'pics 初回の参考表示と信号行の鮮度'
+        record FAIL 'pics 信号の柱の状態・ゲージ・鮮度'
     fi
     printf '%s\n' "$run_log" >> "$log"
     pics_scenario stop || record FAIL 'pics 再生停止'
+    if [[ -n $original_marks ]]; then
+        sky_settings --ez spatial_marks "$original_marks" --ez clear_north true ||
+            record FAIL 'pics 元の設定に復元'
+    fi
 }
 
 save_safety_log() {
