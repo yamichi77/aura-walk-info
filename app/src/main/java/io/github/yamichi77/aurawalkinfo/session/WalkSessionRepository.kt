@@ -1,5 +1,10 @@
 package io.github.yamichi77.aurawalkinfo.session
 
+import io.github.yamichi77.aurawalkinfo.heading.HeadPose
+import io.github.yamichi77.aurawalkinfo.heading.HeadingFix
+import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
+import io.github.yamichi77.aurawalkinfo.heading.NorthEstimate
+
 import io.github.yamichi77.aurawalkinfo.location.AddressRepository
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.location.DistanceCalculator
@@ -35,6 +40,7 @@ internal class WalkSessionInput(
     val ticks: Flow<Unit> = sessionTicks(),
     val replay: Boolean = false,
     val record: (suspend (Flow<SessionMetrics>) -> Unit)? = null,
+    val heading: HeadingTracking? = null,
 )
 
 internal data class SessionMetrics(
@@ -47,6 +53,9 @@ internal data class SessionMetrics(
     val distanceMeters: Double,
     val walkingTimeMillis: Long,
     val bearingDeg: Float?,
+    val headPose: HeadPose? = null,
+    val headingFix: HeadingFix? = null,
+    val north: NorthEstimate? = null,
 )
 
 class WalkSessionRepository internal constructor(
@@ -131,6 +140,7 @@ class WalkSessionRepository internal constructor(
         var reportedDistance = 0.0
         var intervalAccuracy: Float? = null
         var intervalDecision: FixDecision? = null
+        var intervalHeadingFix: HeadingFix? = null
         channelFlow {
             val control = launch { measurement.collect { send(Event.Control(it)) } }
             try {
@@ -158,6 +168,7 @@ class WalkSessionRepository internal constructor(
                     lastReportedSecond = if (input.replay) -1L else 0L
                     intervalAccuracy = null
                     intervalDecision = null
+                    intervalHeadingFix = null
                     metrics = openMetrics()
                     mutableState.update { it.copy(distanceMeters = 0.0, walkingTimeMillis = 0, elapsedMillis = 0) }
                 } else if (!active && start != null) {
@@ -180,6 +191,15 @@ class WalkSessionRepository internal constructor(
                     distance.update(MotionState.NO_FIX)
                 }
                 latest = sample
+                if (input.heading != null) {
+                    val headingFix = HeadingFix(
+                        sample.elapsedRealtimeMillis, sample.bearingDeg?.toDouble(),
+                        sample.bearingAccuracyDeg?.toDouble(), sample.speedMps?.toDouble(),
+                        sample.accuracyMeters.toDouble(),
+                    )
+                    input.heading.onFix(headingFix)
+                    if (start != null && headingFix.timeMillis >= start) intervalHeadingFix = headingFix
+                }
                 motion = classifier.onLocation(sample, now)
                 if (classifier.latestSpeedMps?.let { it >= MotionThresholds.WALKING_MPS } == true) {
                     bearing = sample.bearingDeg ?: bearing
@@ -216,12 +236,16 @@ class WalkSessionRepository internal constructor(
                         if (input.replay) fix?.accuracyMeters else intervalAccuracy,
                         distance.distanceMeters - reportedDistance, intervalDecision,
                         distance.distanceMeters, walkingTime, bearing,
+                        headPose = input.heading?.poseAt(now),
+                        headingFix = intervalHeadingFix,
+                        north = if (metrics != null) input.heading?.estimate(now) else null,
                     ),
                 )
                 lastReportedSecond = elapsedSeconds
                 reportedDistance = distance.distanceMeters
                 intervalAccuracy = null
                 intervalDecision = null
+                intervalHeadingFix = null
             }
         }
         addressPoints.close()

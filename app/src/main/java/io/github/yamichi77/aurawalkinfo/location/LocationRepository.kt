@@ -11,6 +11,7 @@ data class LocationSample(
     val accuracyMeters: Float,
     val speedMps: Float? = null,
     val bearingDeg: Float? = null,
+    val bearingAccuracyDeg: Float? = null,
 )
 
 interface LocationRepository {

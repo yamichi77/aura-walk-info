@@ -98,3 +98,21 @@ $pkg = "io.github.yamichi77.aurawalkinfo"
 | 45° / 17 | |
 | 60° / 17.5 | |
 | 67.5° / 17.5 | |
+
+## 追加機能の確認（T15、受け入れで実行）
+
+1. AURA を装着してロックを解除し、Git Bash で `bash scripts/device-check.sh --only heading,speech` を実行する。準備完了後、`heading` で正面を向いて約60秒間静止する。Geospatial を試すときは静止前に画面でデータの利用に同意する。スクリプトは `AuraProbe` を採取し、`heading result` と `speech result` を集計する。センサーと Geospatial の個別結果は `build/device-check/<日時>/log.txt` を見る。静止時は追跡の各状態の回数と、360° 境界をまたいで連続化した yaw の最大値と最小値の差（`rangeDeg`）を記録する。
+2. `speech` が起動したら、マイクの許可を求められた場合は許可し、画面に指示が出たら「東京駅」と話す。認識の受付は最長8秒。端末内認識サービスが利用できない場合はシステム既定の認識サービスで試す。日本語モデルがインストール済みか、途中結果と最終結果が届いたか、最終結果が「東京駅」か、Geocoder の件数を確認する。
+3. 通常モードで歩行記録を開始し、屋外で5〜10分、向きの異なる直線区間を含むコースを歩く。歩行記録を終了したら、[フィールドログの手順](field-test.md) で CSV を取り出し、`python scripts/heading-analysis.py <CSV>` を実行する。分析は1秒ごとの記録を使うため、瞬間的な追跡断や軌跡の曲がりを見落とすことがある。
+4. 軸と符号は安全な場所で確認する。歩行記録を動かしたまま、頭を水平にしてその場で右を向き、前後の `ar_yaw_deg` の最短角度差を比較する。増えれば `--yaw-sign=1`、減れば `--yaw-sign=-1`。また、`ar_yaw_deg` が 0° 付近になる向きで前進して、主に減ったのが Z なら `--forward=-Z`、増えたのが Z なら `--forward=+Z` を加えて分析する。歩行のばらつきだけでは、正面を180°入れ替えた候補と yaw 符号の候補に同率が残る。
+
+Geospatial の設定確認には ARCore API が有効な Google Cloud プロジェクトと承認設定が必要。キーなしで試す場合はアプリのパッケージ名と署名証明書の SHA-1 に対応する Android OAuth クライアントを設定する。[Android Developers の設定手順](https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/geospatial/setup)
+
+| 項目 | 受け入れ結果 |
+| --- | --- |
+| 地磁気・回転ベクトル | |
+| Geospatial の設定・追跡状態 | |
+| 静止60秒の追跡と yaw の範囲 | |
+| 端末内の日本語認識・認識結果・Geocoder 件数 | |
+| 歩行ログの標本数・オフセット・ばらつき・ドリフト | |
+| ARCore 座標の正面と yaw の符号 | |

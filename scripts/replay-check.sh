@@ -79,16 +79,25 @@ check_scenario() {
 check_fieldlog() {
     awk -F, '
         function metric(value) { return value ~ /^[0-9]+\.[0-9][0-9][0-9]$/ }
+        function signed_metric(value) { return value ~ /^-?[0-9]+\.[0-9][0-9][0-9]$/ }
         NR == 1 {
-            if ($0 != "elapsed_s,state,avg_speed_mps,accuracy_m,added_distance_m,fix_decision,provider") invalid = 1
+            header = "elapsed_s,state,avg_speed_mps,accuracy_m,added_distance_m,fix_decision,provider,"
+            header = header "ar_tracking,ar_x_m,ar_z_m,ar_yaw_deg,gps_bearing_deg,gps_bearing_acc_deg,gps_speed_mps,"
+            header = header "north_offset_deg,north_uncertainty_deg"
+            if ($0 != header) invalid = 1
             next
         }
         {
-            if (NF != 7 || $1 !~ /^[0-9]+$/ || $1 != NR - 1 ||
+            if (NF != 16 || $1 !~ /^[0-9]+$/ || $1 != NR - 1 ||
                 $2 !~ /^(WALKING|STOPPED|FAST|NO_FIX)$/ ||
                 ($3 != "" && !metric($3)) || ($4 != "" && !metric($4)) || !metric($5) ||
                 $6 !~ /^(ACCEPTED|POOR_ACCURACY|TOO_LITTLE_MOVEMENT|NOT_WALKING|NO_SAMPLE)$/ ||
                 $7 !~ /^(fused|gps)$/ || $0 ~ /[+-]?[0-9][0-9]?[0-9]?\.[0-9][0-9][0-9][0-9]+/) invalid = 1
+            if ($8 !~ /^(TRACKING|PAUSED|STOPPED)?$/ ||
+                ($8 != "TRACKING" && ($9 != "" || $10 != "" || $11 != ""))) invalid = 1
+            for (column = 9; column <= NF; column++) {
+                if ($column != "" && !signed_metric($column)) invalid = 1
+            }
         }
         END { exit invalid || NR < 21 ? 1 : 0 }
     ' "$1"
