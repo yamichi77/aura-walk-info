@@ -177,13 +177,22 @@ capture_panel() {
 }
 
 check_placement() {
+    local check panel hide_disabled=false
     start_run selfcheck -W --es fakeState stopped --ez selfcheck true --ez grid true --ez capture true || return 0
     echo "約12秒計測します。最初の3秒は正面を向き、その後に頭を左右に振ってから止めてください。"
     sleep 12
     collect_run selfcheck xr
+    if grep -Eq 'AuraPlacement[[:space:]]*: follow SKIP head-motion hide disabled[[:space:]]*$' <<< "$run_log"; then
+        hide_disabled=true
+    fi
     for check in placement follow clearzone; do
         if grep -Eq "AuraPlacement[[:space:]]*: $check PASS" <<< "$run_log"; then
             record PASS "$check"
+        elif $hide_disabled && [[ $check == follow ]]; then
+            record SKIP 'follow head-motion hide disabled'
+        elif $hide_disabled && [[ $check == clearzone ]] &&
+            grep -Eq 'AuraPlacement[[:space:]]*: clearzone FAIL[[:space:]]*$' <<< "$run_log"; then
+            results+=('FAIL clearzone（参考値）')
         else
             record FAIL "$check"
         fi

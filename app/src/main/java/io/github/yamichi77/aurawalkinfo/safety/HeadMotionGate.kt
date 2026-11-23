@@ -4,6 +4,8 @@ import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.sqrt
 
+internal const val HideHudOnHeadMotion = false
+
 internal class HeadMotionGate {
     data class Rotation(val x: Double, val y: Double, val z: Double, val w: Double) {
         private fun dot(other: Rotation) = x * other.x + y * other.y + z * other.z + w * other.w

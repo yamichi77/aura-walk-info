@@ -20,6 +20,8 @@
 
 測位結果として出力するのは初回までの秒数、精度、プロバイダ名、速度と方位の有無。ランタイム権限はアプリから要求できる。今回は `ACCESS_COARSE_LOCATION`、`ACCESS_FINE_LOCATION`、`HEAD_TRACKING` を `adb shell pm grant` で事前付与した。
 
+- 屋内では fused の位置が約5〜6秒おき・精度 11〜12m だった（2026-11-23）。
+
 ## 地図
 
 | 項目 | 結果 | 確かめ方 | アプリへの影響 |
@@ -64,7 +66,7 @@ $pkg = "io.github.yamichi77.aurawalkinfo"
 
 - T4 の確認時は `mWakefulness=Asleep`、`mLastSleepReason=xr_doff`。非装着中は PNG で 2D の描画内容を確認できた。グラス上の配置・原点・回転符号は装着時の実測待ち。
 - 実装の初期値は +X が右、+Y が上、−Z が正面。パネルは局所 +Z が頭を向くよう回転する。Compose XR 1.0.0-rc01 の `ViewTarget` が前方へ 0.5 m ずらすことは同梱バイナリで確認し、配置で相殺した。
-- グラスを装着してロックを解除し、Git Bash で `bash scripts/device-check.sh --only placement,headmotion` を実行する。`AuraPlacement` は静止サンプルで配置を判定し、回転中のパネルの不透明度を確認する。ログは `build/device-check/<日時>/log.txt` に保存される。非装着で PNG のみ取る場合は `--preview` を付ける。
+- グラスを装着してロックを解除し、Git Bash で `bash scripts/device-check.sh --only placement,headmotion` を実行する。`AuraPlacement` は静止サンプルで配置を判定し、表示中のパネルの内側の端を `clearzone` の参考値として記録する。頭の回転による非表示を無効にしている間は `follow` をスキップする。ログは `build/device-check/<日時>/log.txt` に保存される。非装着で PNG のみ取る場合は `--preview` を付ける。
 
 ## 安全表示と入力（T6b）
 

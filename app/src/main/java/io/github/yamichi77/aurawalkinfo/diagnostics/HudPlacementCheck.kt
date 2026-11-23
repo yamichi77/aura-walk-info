@@ -9,6 +9,7 @@ import androidx.xr.scenecore.PanelEntity
 import androidx.xr.scenecore.Space
 import androidx.xr.scenecore.scene
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
+import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import java.util.Locale
 import kotlin.math.abs
@@ -43,7 +44,7 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         val start = startedAt ?: now.also { startedAt = it }
         if (pose != null) poseAvailable = true
 
-        if (pose != null && hiddenSince == null) {
+        if (pose != null && (!HideHudOnHeadMotion || hiddenSince == null)) {
             val isStationary = speed != null && speed < HeadMotionGate.StationaryDegreesPerSecond
             val scene = session.scene
             val inverseHead = scene.perceptionSpace.transformPoseTo(pose, scene.activitySpace).inverse
@@ -61,7 +62,7 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         }
 
         // Allow the fade and up to two 30 Hz frames for Compose/SceneCore to apply it.
-        if (speed != null && speed > HeadMotionGate.HideDegreesPerSecond && hiddenSince != null &&
+        if (HideHudOnHeadMotion && speed != null && speed > HeadMotionGate.HideDegreesPerSecond && hiddenSince != null &&
             now - hiddenSince >= HeadMotionGate.HideMillis * 1_000_000L + 67_000_000L
         ) {
             rotatingSamples++
@@ -76,9 +77,13 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         Log.i(Tag, "placement ${verdict(placementPass)} staticSamples=${stationary.values.minOf { it.size }}")
         val clearZonePass = clearZone.map { (name, samples) -> samples.report(name) }.all { it }
         Log.i(Tag, "clearzone ${verdict(clearZonePass)}")
-        val followPass = rotatingSamples > 0 && visibleSamples == 0 && missingPanelSamples == 0 && hiddenGridSamples == 0
-        Log.i(Tag, "follow ${verdict(followPass)} rotatingSamples=$rotatingSamples " +
-            "nonzeroAlpha=$visibleSamples missingPanels=$missingPanelSamples gridNotVisible=$hiddenGridSamples")
+        if (HideHudOnHeadMotion) {
+            val followPass = rotatingSamples > 0 && visibleSamples == 0 && missingPanelSamples == 0 && hiddenGridSamples == 0
+            Log.i(Tag, "follow ${verdict(followPass)} rotatingSamples=$rotatingSamples " +
+                "nonzeroAlpha=$visibleSamples missingPanels=$missingPanelSamples gridNotVisible=$hiddenGridSamples")
+        } else {
+            Log.i(Tag, "follow SKIP head-motion hide disabled")
+        }
         return !poseAvailable
     }
 

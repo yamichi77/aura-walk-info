@@ -51,6 +51,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudPlacementCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
+import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
@@ -131,10 +132,10 @@ internal fun HudScene(
             }
         }
     }
-    val motionOpacity = animateFloatAsState(
+    val motionOpacity = if (HideHudOnHeadMotion) animateFloatAsState(
         if (hiddenForMotion) 0f else 1f,
         tween(if (hiddenForMotion) HeadMotionGate.HideMillis else HeadMotionGate.ShowMillis),
-    )
+    ) else null
 
     if (!configured || spec is HudVisualSpec.Hidden) return
     Subspace(follow = FollowTarget.view(FollowMode.tight(TrackedDimensions.All))) {
@@ -151,7 +152,7 @@ internal fun HudScene(
             scale?.let {
                 if (tracking || showRotationFallback) {
                     SpatialHudPanels(
-                        session, it, spec, locationDenied, debug, check, motionOpacity.value, tracking,
+                        session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
                         showRotationFallback, onNoticeTimeout,
                     )
                 }

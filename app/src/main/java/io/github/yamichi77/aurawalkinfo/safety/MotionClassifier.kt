@@ -38,18 +38,18 @@ class MotionClassifier(private val distanceCalculator: DistanceCalculator) {
         if (previous != null) {
             val gap = sample.elapsedRealtimeMillis - previous.elapsedRealtimeMillis
             if (gap <= 0) return onTick(nowMillis)
-            if (gap > MotionThresholds.SPEED_WINDOW_MILLIS) {
+            if (gap >= MotionThresholds.NO_FIX_MILLIS) {
                 speeds.clear()
                 clearConfirmation()
-            }
-            if (gap >= MotionThresholds.NO_FIX_MILLIS && state != MotionState.FAST) {
-                state = MotionState.NO_FIX
+                if (state != MotionState.FAST) state = MotionState.NO_FIX
             }
         }
 
         latestSpeedMps = sample.speedMps?.toDouble() ?: previous?.let {
-            val gap = sample.elapsedRealtimeMillis - it.elapsedRealtimeMillis
-            if (gap < MotionThresholds.NO_FIX_MILLIS) {
+            if (sample.accuracyMeters <= MotionThresholds.MAX_FIX_ERROR_METERS &&
+                MotionThresholds.hasFix(it, sample.elapsedRealtimeMillis)
+            ) {
+                val gap = sample.elapsedRealtimeMillis - it.elapsedRealtimeMillis
                 distanceCalculator.metersBetween(it, sample) * 1_000 / gap
             } else {
                 null
@@ -61,15 +61,19 @@ class MotionClassifier(private val distanceCalculator: DistanceCalculator) {
     }
 
     fun onTick(nowMillis: Long): MotionState {
+        val hasFix = lastSample?.let { MotionThresholds.hasFix(it, nowMillis) } == true
         while (speeds.firstOrNull()?.let { nowMillis - it.timeMillis > MotionThresholds.SPEED_WINDOW_MILLIS } == true) {
             speeds.removeFirst()
         }
-        val average = if (speeds.isEmpty()) null else speeds.map { it.metersPerSecond }.average()
+        val average = when {
+            speeds.isNotEmpty() -> speeds.map { it.metersPerSecond }.average()
+            hasFix -> latestSpeedMps
+            else -> null
+        }
         averageSpeedMps = average
         fastSince = trackSince(average != null && average > MotionThresholds.FAST_MPS, fastSince, nowMillis)
         slowSince = trackSince(average != null && average <= MotionThresholds.FAST_MPS, slowSince, nowMillis)
 
-        val hasFix = lastSample?.let { MotionThresholds.hasFix(it, nowMillis) } == true
         stoppedSince = trackSince(
             hasFix && average != null && average < MotionThresholds.STOPPED_MPS,
             stoppedSince,
@@ -79,7 +83,11 @@ class MotionClassifier(private val distanceCalculator: DistanceCalculator) {
         state = when {
             state == MotionState.FAST && !confirmed(slowSince, nowMillis) -> MotionState.FAST
             confirmed(fastSince, nowMillis) -> MotionState.FAST
-            !hasFix -> MotionState.NO_FIX
+            !hasFix -> {
+                // Keep pending FAST evidence from reported speeds in the current window.
+                slowSince = null
+                MotionState.NO_FIX
+            }
             state == MotionState.NO_FIX || state == MotionState.FAST ->
                 if (average != null && average >= MotionThresholds.WALKING_MPS) MotionState.WALKING
                 else MotionState.STOPPED
