@@ -73,6 +73,11 @@ sealed interface NavState {
     data object Searching : NavState
     data class Candidates(val items: List<NavCandidate>) : NavState
     data class Routing(val destination: NavDestination) : NavState
+    data class Preview(
+        val destination: NavDestination,
+        val route: NavRoute,
+        val origin: LocationSample,
+    ) : NavState
     data class Guiding(
         val destination: NavDestination,
         val route: NavRoute,

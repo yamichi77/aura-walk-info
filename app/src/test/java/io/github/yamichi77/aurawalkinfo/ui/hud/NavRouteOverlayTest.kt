@@ -15,7 +15,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.diagnostics.replay.syntheticFix
+import io.github.yamichi77.aurawalkinfo.nav.NavDestination
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
+import io.github.yamichi77.aurawalkinfo.nav.NavState
+import io.github.yamichi77.aurawalkinfo.nav.syntheticNavRoute
+import java.time.Duration
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -30,6 +35,64 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NavRouteOverlayTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    fun drawsFullPreviewLineStartDotAndGoalPinInBothBigMapModes() {
+        val route = syntheticNavRoute()
+        val preview = NavState.Preview(NavDestination(route.polyline.last()), route, syntheticFix(0))
+        val spec = hudVisualSpecFor(hudTestState(MotionState.STOPPED)) as HudVisualSpec.Clusters
+        compose.setContent {
+            Column {
+                for (mode in BigMapMode.entries) {
+                    MiniMapPanel(
+                        spec.copy(destinationPrompt = DestinationPrompt.Preview(preview)), HudDebugOptions(),
+                        Modifier.size(100.dp).background(Color.Black), bigMapMode = mode,
+                        routeProjection = { points ->
+                            points.map {
+                                when (it) {
+                                    route.polyline.first() -> Offset(20f, 60f)
+                                    route.polyline[1] -> Offset(60f, 60f)
+                                    else -> Offset(60f, 30f)
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        val overlays = compose.onAllNodes(androidx.compose.ui.test.hasTestTag("route-preview-overlay"))
+            .fetchSemanticsNodes()
+        assertEquals(2, overlays.size)
+        compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val origin = IntArray(2).also(window::getLocationInWindow)
+            val bitmap = window.drawToBitmap()
+            for (overlay in overlays) {
+                val bounds = overlay.boundsInWindow
+                fun blue(x: Int, y: Int) = Color(bitmap.getPixel(
+                    bounds.left.toInt() - origin[0] + x, bounds.top.toInt() - origin[1] + y,
+                )).blue
+                assertTrue("start dot", blue(19, 59) > 0.85f)
+                assertTrue("full line", blue(40, 60) > 0.85f && blue(60, 47) > 0.85f)
+                assertTrue("pin above the goal", blue(60, 19) > 0.6f)
+                assertEquals("no centered current-location arrow", 0f, blue(50, 50), 0f)
+            }
+        }
+    }
+
+    @Test
+    fun summaryRoundsMinutesUpAndFormatsEachDistanceRange() {
+        val route = syntheticNavRoute()
+        assertEquals("約 1分・850m", routePreviewSummary(route.copy(
+            duration = Duration.ofSeconds(60), distanceMeters = 850,
+        )))
+        assertEquals("約 2分・1.24km", routePreviewSummary(route.copy(
+            duration = Duration.ofSeconds(60, 1), distanceMeters = 1_249,
+        )))
+        assertEquals("約 15分・12.3km", routePreviewSummary(route.copy(
+            duration = Duration.ofSeconds(899), distanceMeters = 12_399,
+        )))
+    }
 
     @Test
     fun drawsRemainingLineDestinationRingAndTurnDotInEachMapMode() {

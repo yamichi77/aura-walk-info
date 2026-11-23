@@ -6,25 +6,40 @@ import androidx.compose.ui.test.performTouchInput
 
 import android.graphics.Paint
 import android.os.SystemClock
+import android.view.View
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.core.view.drawToBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.nav.NavCandidate
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
+import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import java.time.ZonedDateTime
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -44,6 +59,7 @@ class QuantumHudTest {
     private val notice = mutableStateOf(false)
     private val prompt = mutableStateOf<DestinationPrompt>(DestinationPrompt.Map)
     private val map = mutableStateOf(BigMapControl())
+    private lateinit var view: View
     private var now = ZonedDateTime.parse("2026-11-23T09:05:00+09:00")
     private val wallClock = WallClock { now }
 
@@ -185,11 +201,18 @@ class QuantumHudTest {
             effect("$button-gather")
             tag("quantum-$button-orbit").assertDoesNotExist()
         }
+        tag("quantum-bigmap-rim").assertDoesNotExist()
         compose.mainClock.advanceTimeBy(550)
+        effect("bigmap-rim")
         for (button in listOf("nav_destination", "bigmap_mode")) {
             tag("quantum-$button-gather").assertDoesNotExist()
             effect("$button-orbit")
+            effect("$button-rim")
         }
+        compose.mainClock.advanceTimeBy(200)
+        tag("quantum-bigmap-rim").assertDoesNotExist()
+        tag("quantum-nav_destination-rim").assertDoesNotExist()
+        effect("nav_destination-orbit")
         compose.mainClock.advanceTimeBy(1_000)
         noEffects()
         tag("bigmap_mode").performClick()
@@ -233,6 +256,12 @@ class QuantumHudTest {
         frames()
         noEffects()
         tag("bigmap").assertIsDisplayed()
+        change { prompt.value = candidatePrompt() }
+        text("合成候補", "850m ・ みほん市", "やめる")
+        tag("quantum-candidate-label").assertDoesNotExist()
+        tag("quantum-bigmap-rim").assertDoesNotExist()
+        tag("quantum-bigmap_mode-rim").assertDoesNotExist()
+        change { prompt.value = DestinationPrompt.Map }
         tag("bigmap_mode").assertIsDisplayed().performClick()
         frames()
         noEffects()
@@ -244,6 +273,67 @@ class QuantumHudTest {
         tag("bigmap").assertDoesNotExist()
         tag("map").assertIsDisplayed()
     }
+
+    @Test
+    fun candidatesGatherAsTextAndTheMapSettlesAtFortyPercentOpacity() {
+        show()
+        settle()
+        tag("map").performClick()
+        frames()
+        settle()
+        val bounds = tag("bigmap").getUnclippedBoundsInRoot()
+        val x = ((bounds.left + bounds.right) / 2).value.toInt()
+        val y = bounds.top.value.toInt()
+        fun rimBlue() = compose.runOnIdle {
+            val color = Color(view.drawToBitmap().getPixel(x, y))
+            color.blue * color.alpha
+        }
+        val ordinary = rimBlue()
+        assertTrue(ordinary > 0.15f)
+        change { prompt.value = DestinationPrompt.Listening() }
+        settle()
+        assertEquals(0.3f * ordinary, rimBlue(), 0.02f)
+        change { prompt.value = candidatePrompt() }
+        for (line in listOf("合成候補", "850m ・ みほん市", "やめる")) {
+            compose.onNode(hasText(line) and hasTestTag("quantum-candidate-label"), useUnmergedTree = true)
+                .assertExists()
+        }
+        settle()
+        text("合成候補", "850m ・ みほん市", "やめる")
+        tag("quantum-candidate-label").assertDoesNotExist()
+        assertEquals(0.4f * ordinary, rimBlue(), 0.02f)
+    }
+
+    @Test
+    fun renderingUsesFullOpacityAndTheLargerRadiusOnlyWhileGathering() {
+        val progress = mutableStateOf(0.71f)
+        val animation = QuantumAnimation(QuantumEffect.Candidates, progress)
+        val particle = generateSequence(0) { it + 1 }
+            .map { QuantumParticle(QuantumPoint(0f, 0f), Random(it)) }
+            .first { it.radiusDp > 1.9f }
+        compose.setContent {
+            view = LocalView.current
+            Canvas(Modifier.size(21.dp).background(Color.Black).testTag("particle")) {
+                drawQuantumParticles(listOf(particle), animation, center, 1f, outgoing = false)
+            }
+        }
+        val bounds = tag("particle").getUnclippedBoundsInRoot()
+        val x = bounds.left.value.toInt() + 10
+        val y = bounds.top.value.toInt() + 10
+        fun sample() = compose.runOnIdle {
+            val bitmap = view.drawToBitmap()
+            Color(bitmap.getPixel(x, y)).blue to Color(bitmap.getPixel(x + 1, y)).blue
+        }
+        val (center, edge) = sample()
+        assertEquals(HudDetail.blue, center, 0.02f)
+        assertTrue(edge > 0.6f)
+        compose.runOnIdle { progress.value = 1f }
+        assertEquals(0f to 0f, sample())
+    }
+
+    private fun candidatePrompt() = DestinationPrompt.Candidates(
+        listOf(NavCandidate("1", "合成候補", "架空県みほん市", NavPoint(0.01, 0.01), 850.0)),
+    )
 
     @Test
     fun glyphSamplingReadsJapaneseAndNumericOutlines() {
@@ -259,6 +349,7 @@ class QuantumHudTest {
     private fun show(enabled: Boolean = true) {
         compose.mainClock.autoAdvance = false
         compose.setContent {
+            view = LocalView.current
             AdditiveDisplayTheme {
                 val spec = hudVisualSpecFor(
                     state.value, noticePending = notice.value, phase = phase.value, destinationPrompt = prompt.value,
@@ -295,9 +386,9 @@ class QuantumHudTest {
     }
     private fun effect(panel: String) = tag("quantum-$panel").assertExists()
     private fun noEffects() {
-        for (panel in listOf("left", "map", "bigmap")) tag("quantum-$panel").assertDoesNotExist()
+        for (panel in listOf("left", "map", "bigmap", "bigmap-rim")) tag("quantum-$panel").assertDoesNotExist()
         for (button in listOf("nav_destination", "bigmap_mode")) {
-            for (effect in listOf("gather", "orbit", "ripple")) tag("quantum-$button-$effect").assertDoesNotExist()
+            for (effect in listOf("gather", "orbit", "ripple", "rim")) tag("quantum-$button-$effect").assertDoesNotExist()
         }
     }
 

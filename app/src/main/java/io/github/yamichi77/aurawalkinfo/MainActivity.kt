@@ -107,6 +107,10 @@ class MainActivity : ComponentActivity() {
         DestinationInput(
             lifecycleScope, container.navRepository, AndroidDestinationSpeech(this), ::requestMicrophone,
             Clock(SystemClock::elapsedRealtime), onInputChanged = ::refreshControls,
+            onGuidanceStarted = {
+                bigMapViewport.recenter()
+                bigMapViewport.resetZoom()
+            },
         ) {
             (locationGranted || fakeMotion != null) && !visibility.noticePending &&
                 controls.map.advance(

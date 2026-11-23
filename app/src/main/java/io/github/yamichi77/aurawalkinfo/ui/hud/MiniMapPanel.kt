@@ -56,6 +56,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.Map3dSnapshotCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.saveProbePng
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
+import io.github.yamichi77.aurawalkinfo.nav.NavState
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -116,7 +117,9 @@ internal fun MiniMapPanel(
     val hasKey = remember(context) { context.hasMapsKey() }
     val selfCheck = debug.selfCheck && context.isDebugBuild()
     val center = spec.mapCenter
+    val preview = (spec.destinationPrompt as? DestinationPrompt.Preview)?.route.takeIf { bigMapMode != null }
     val cameraCenter = viewport?.center(center) ?: center
+        ?: preview?.origin?.let { MapCenter(it.latitude, it.longitude) }
     val mapOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
     val route = spec.navigation?.route
     var project by remember { mutableStateOf<ProjectNavPoints?>(null) }
@@ -153,14 +156,23 @@ internal fun MiniMapPanel(
                 camera = camera,
                 onRouteProjection = { project = it },
                 viewport = viewport,
+                preview = preview,
             )
         }
-        if (route != null) (routeProjection ?: project)?.let {
-            NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize())
+        (routeProjection ?: project)?.let {
+            if (preview != null) {
+                RoutePreviewOverlay(preview, it, Modifier.matchParentSize().alpha(mapOpacity))
+            } else if (route != null) {
+                NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize().alpha(
+                    if (spec.destinationPrompt is DestinationPrompt.Candidates) mapOpacity else 1f,
+                ))
+            }
         }
         MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck) { canvasCenter ->
             val projection = project
-            if (viewport != null && projection != null) {
+            if (preview != null) {
+                null
+            } else if (viewport != null && projection != null) {
                 center?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
             } else {
                 canvasCenter
@@ -182,12 +194,16 @@ internal fun ClickableMap(
     viewport: BigMapViewport? = null,
     onMapPan: () -> Unit = {},
     onMapHold: (NavPoint) -> Unit = {},
+    quantumEnabled: Boolean = QuantumEffectsEnabled,
 ) {
     if (target == HudTarget.BIGMAP) {
         BoxWithConstraints(modifier) {
             val diameter = minOf(maxHeight, maxWidth)
-            val listening = enabled && spec.destinationPrompt is DestinationPrompt.Listening
-            val mapOpacity = if (listening) 0.3f else spec.opacity
+            val mapOpacity = when {
+                spec.destinationPrompt is DestinationPrompt.Candidates -> 0.4f
+                enabled && spec.destinationPrompt is DestinationPrompt.Listening -> 0.3f
+                else -> spec.opacity
+            }
             MiniMapPanel(
                 spec = spec.copy(
                     opacity = mapOpacity, mapOpacity = mapOpacity, mapLineOpacity = 0.4f,
@@ -200,8 +216,10 @@ internal fun ClickableMap(
                 viewport = viewport,
             )
             val onPan by rememberUpdatedState<(Offset) -> Unit> { delta ->
-                viewport?.pan(delta)
-                onMapPan()
+                if (spec.destinationPrompt !is DestinationPrompt.Preview) {
+                    viewport?.pan(delta)
+                    onMapPan()
+                }
             }
             val onHold by rememberUpdatedState<(Offset) -> Unit> { pixel ->
                 if (spec.destinationPrompt == DestinationPrompt.Map) {
@@ -215,7 +233,7 @@ internal fun ClickableMap(
                     else Modifier,
                 ),
             )
-            DestinationMapOverlay(spec.destinationPrompt, diameter, enabled, onTap)
+            DestinationMapOverlay(spec.destinationPrompt, diameter, enabled, onTap, quantumEnabled)
         }
     } else {
         Box(modifier) {
@@ -239,6 +257,7 @@ internal fun MiniMapSurface(
     camera: CameraPositionState = rememberCameraPositionState { this.position = position },
     onRouteProjection: ((ProjectNavPoints?) -> Unit)? = null,
     viewport: BigMapViewport? = null,
+    preview: NavState.Preview? = null,
 ) {
     val context = LocalContext.current
     val properties = remember(context, mapStyle, buildingsEnabled) {
@@ -250,13 +269,14 @@ internal fun MiniMapSurface(
         )
     }
     val target by rememberUpdatedState(position)
+    val previewCamera by rememberUpdatedState(preview?.let { it to position.tilt })
     val startedAt = remember { SystemClock.elapsedRealtime() }
     val loaded = remember { CompletableDeferred<Long>() }
     val sdkMap = remember { CompletableDeferred<SdkMap>() }
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
     val captureSnapshot = checkSnapshot || probeCase != null
     GoogleMap(
-        modifier = if (captureSnapshot) modifier.onSizeChanged { mapSize = it } else modifier,
+        modifier = if (captureSnapshot || preview != null) modifier.onSizeChanged { mapSize = it } else modifier,
         cameraPositionState = camera,
         googleMapOptionsFactory = { GoogleMapOptions().backgroundColor(android.graphics.Color.BLACK) },
         properties = properties,
@@ -278,10 +298,15 @@ internal fun MiniMapSurface(
             if (viewport != null) viewport.gestureMap = gestureMap
             // Finish each animation and use the latest pending fix if updates arrive faster than it.
             try {
-                snapshotFlow { target }.conflate().collect { next ->
-                    if (viewport != null) {
+                snapshotFlow {
+                    val route = previewCamera
+                    if (route == null) null to target else RoutePreviewCamera(route.first, route.second, mapSize) to null
+                }.conflate().collect { (overview, next) ->
+                    if (overview != null) {
+                        overview.fit(map)
+                    } else if (next != null && viewport != null) {
                         if (map.cameraPosition != next) map.moveCamera(CameraUpdateFactory.newCameraPosition(next))
-                    } else if (camera.position != next) {
+                    } else if (next != null && camera.position != next) {
                         try {
                             camera.animate(CameraUpdateFactory.newCameraPosition(next), CAMERA_ANIMATION_MS)
                         } catch (_: CancellationException) {

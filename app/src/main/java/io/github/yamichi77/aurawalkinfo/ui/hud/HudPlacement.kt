@@ -63,7 +63,12 @@ internal object HudPlacement {
         BigMapButtonPlacement(HudTarget.BIGMAP_MODE, -12f),
     )
 
-    internal class BigMapButtonPlacement(val target: HudTarget, pitch: Float, val label: String? = null) {
+    val routePreviewButtons = listOf(
+        BigMapButtonPlacement(HudTarget.NAV_START, bigMapButtons[0].pitch, "開始"),
+        BigMapButtonPlacement(HudTarget.NAV_CANCEL, bigMapButtons[1].pitch, "やめる"),
+    )
+
+    internal class BigMapButtonPlacement(val target: HudTarget, val pitch: Float, val label: String? = null) {
         val width = 2 * planeHalfSpan(5f)
         val height = 2 * planeHalfSpan(2.7f)
         val centerY = planeHalfSpan(pitch)

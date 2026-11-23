@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,6 +52,7 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.gridWidthMeters
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudClick
 import io.github.yamichi77.aurawalkinfo.ui.hud.rememberCountdownPresentation
 import io.github.yamichi77.aurawalkinfo.ui.hud.rememberBigMapDestinationLabel
+import io.github.yamichi77.aurawalkinfo.ui.hud.rememberBigMapButtons
 import io.github.yamichi77.aurawalkinfo.ui.hud.rememberHudQuantum
 
 @Composable
@@ -154,11 +157,13 @@ internal fun PhoneScreen(
                         bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * dpPerMeter).dp,
                         bigMapMode = bigMapMode,
                         viewport = viewport, onMapPan = onMapPan, onMapHold = onMapHold,
+                        quantumEnabled = quantumEnabled,
                     )
                 }
                 val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
                 Column(verticalArrangement = Arrangement.spacedBy(buttonGap)) {
-                    for (button in HudPlacement.bigMapButtons) {
+                    val buttons = rememberBigMapButtons(spec.destinationPrompt, showBigMap)
+                    for (button in buttons) {
                         Box(Modifier.size(buttonWidth, buttonHeight)) {
                             BigMapButton(
                                 button.buttonLabel(destinationLabel, bigMapMode), button.target,
@@ -166,6 +171,9 @@ internal fun PhoneScreen(
                                 onTap, Modifier.fillMaxSize(),
                             )
                         }
+                    }
+                    repeat(buttonCount - buttons.size) {
+                        Spacer(Modifier.height(buttonHeight))
                     }
                 }
             }

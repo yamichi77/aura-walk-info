@@ -12,13 +12,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -26,6 +30,9 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -143,10 +150,18 @@ internal fun BoxScope.DestinationMapOverlay(
     diameter: Dp,
     enabled: Boolean,
     onTap: (HudTarget) -> Unit,
+    quantumEnabled: Boolean,
 ) {
     if (!enabled || prompt == DestinationPrompt.Map || prompt == DestinationPrompt.ConfirmEnd) return
     val primarySize = with(LocalDensity.current) { 16.dp.toSp() }
     val secondarySize = with(LocalDensity.current) { 14.dp.toSp() }
+    if (prompt is DestinationPrompt.Preview) {
+        Text(
+            routePreviewSummary(prompt.route.route), color = HudText, fontSize = secondarySize,
+            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -diameter * 0.1f),
+        )
+        return
+    }
     Column(
         Modifier.align(Alignment.Center).fillMaxWidth(0.72f),
         verticalArrangement = Arrangement.spacedBy(diameter * 0.012f),
@@ -169,31 +184,50 @@ internal fun BoxScope.DestinationMapOverlay(
             )
         }
         if (prompt is DestinationPrompt.Candidates) {
-            prompt.items.take(destinationCandidateTargets.size).forEachIndexed { index, candidate ->
+            val quantum = rememberQuantumAnimation(QuantumEffect.Candidates.takeIf { quantumEnabled })
+            val items = prompt.items.take(destinationCandidateTargets.size)
+            val particlesPerLabel = 60 / (items.size * 2 + 1)
+            items.forEachIndexed { index, candidate ->
                 Column(
                     Modifier.fillMaxWidth().hudClick(destinationCandidateTargets[index], onTap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(
-                        candidate.name, color = HudText, fontSize = primarySize, lineHeight = primarySize,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
+                    CandidateLabel(candidate.name, HudText, primarySize, quantum, particlesPerLabel)
                     val detail = listOf(navDistance(candidate.distanceMeters), shortPlaceAddress(candidate.address))
                         .filter(String::isNotBlank).joinToString(" ・ ")
-                    Text(
-                        detail, color = HudDetail, fontSize = secondarySize, lineHeight = secondarySize,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
+                    CandidateLabel(detail, HudDetail, secondarySize, quantum, particlesPerLabel)
                 }
             }
             Box(
                 Modifier.fillMaxWidth().height(24.dp).hudClick(HudTarget.NAV_CANCEL, onTap),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("やめる", color = HudText, fontSize = secondarySize, lineHeight = secondarySize)
+                CandidateLabel("やめる", HudText, secondarySize, quantum, particlesPerLabel)
             }
         }
     }
+}
+
+@Composable
+private fun CandidateLabel(text: String, color: Color, size: TextUnit, quantum: QuantumAnimation?, count: Int) {
+    var layout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    val result = layout
+    val reveal = if (quantum == null) {
+        Modifier
+    } else if (result == null) {
+        Modifier.alpha(0f)
+    } else {
+        val visible = if (result.isLineEllipsized(0)) text.take(result.getLineEnd(0, visibleEnd = true)) + "…" else text
+        Modifier.testTag("quantum-candidate-label").then(
+            quantumLabelModifier(quantum, visible, size.value, FontWeight.Normal, 1f, count, result.getLineLeft(0)) {
+                result.firstBaseline
+            },
+        )
+    }
+    Text(
+        text, color = color, fontSize = size, lineHeight = size, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = reveal, onTextLayout = { if (quantum != null) layout = it },
+    )
 }
 
 private val addressPrefix = Regex("^日本[、, ]*|^〒?[0-9０-９]{3}[-−－][0-9０-９]{4}\\s*|^東京都|^北海道|^(大阪|京都)府|^[^県]{2,4}県")

@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -40,21 +41,23 @@ import kotlin.random.Random
 
 internal const val QuantumEffectsEnabled = true
 internal const val QuantumTransitionMillis = 500
+internal const val QuantumRimFlashMillis = 200
 private const val FadeStart = 0.7f
 
-internal enum class QuantumEffect { Startup, Walk, OpenMap, CloseMap }
+internal enum class QuantumEffect { Startup, Walk, OpenMap, CloseMap, Candidates }
 
 internal class QuantumAnimation(val effect: QuantumEffect, private val progress: State<Float>) {
     val fraction: Float get() = progress.value
     val contentAlpha: Float get() = quantumContentAlpha(fraction)
     val drawing by derivedStateOf { fraction >= 0f }
+    val gathering by derivedStateOf { fraction in 0f..<1f }
 }
 
 internal fun quantumContentAlpha(fraction: Float) =
     ((fraction - FadeStart) / (1f - FadeStart)).coerceIn(0f, 1f)
 
-internal fun quantumTransitionFrame(fraction: Float, outgoing: Boolean) = QuantumParticleFrame(
-    convergence = if (outgoing) 1f else quantumConvergence(fraction / FadeStart),
+internal fun quantumTransitionFrame(fraction: Float, outgoing: Boolean, gatherUntil: Float = FadeStart) = QuantumParticleFrame(
+    convergence = if (outgoing) 1f else quantumConvergence(fraction / gatherUntil),
     dispersal = if (outgoing) 0.30f * quantumConvergence(fraction) else 0f,
     jitterPhase = fraction * QuantumTransitionMillis * 0.024f,
 )
@@ -127,14 +130,15 @@ internal fun rememberHudQuantum(
 }
 
 @Composable
-private fun rememberQuantumAnimation(effect: QuantumEffect?, waitForRipple: Boolean = false): QuantumAnimation? {
+internal fun rememberQuantumAnimation(effect: QuantumEffect?, waitForRipple: Boolean = false): QuantumAnimation? {
     if (effect == null) return null
     val progress = remember(effect) { mutableFloatStateOf(if (waitForRipple) -1f else 0f) }
     var finished by remember(effect) { mutableStateOf(false) }
     LaunchedEffect(effect, waitForRipple) {
         if (!waitForRipple && !finished) {
-            animate(0f, 1f, animationSpec = tween(QuantumTransitionMillis, easing = LinearEasing)) { value, _ ->
-                progress.floatValue = value
+            val duration = QuantumTransitionMillis + if (effect == QuantumEffect.OpenMap) QuantumRimFlashMillis else 0
+            animate(0f, duration.toFloat(), animationSpec = tween(duration, easing = LinearEasing)) { value, _ ->
+                progress.floatValue = value / QuantumTransitionMillis
             }
             finished = true
         }
@@ -154,7 +158,7 @@ internal fun QuantumMap(
         if (!outgoing) {
             content(Modifier.matchParentSize().graphicsLayer { alpha = animation?.contentAlpha ?: 1f })
         }
-        if (animation != null) {
+        if (animation?.gathering == true) {
             val particles = remember { quantumRingParticles(60) }
             Canvas(Modifier.matchParentSize().testTag(if (large) "quantum-bigmap" else "quantum-map")) {
                 val rim = size.minDimension * 0.5f - 1.dp.toPx()
@@ -163,6 +167,7 @@ internal fun QuantumMap(
                 drawQuantumParticles(particles, animation, center, radius, outgoing)
             }
         }
+        if (large) QuantumRimFlash(animation, Modifier.matchParentSize(), "quantum-bigmap-rim")
     }
 }
 
@@ -182,11 +187,13 @@ internal fun quantumLabelModifier(
     weight: FontWeight,
     scaleX: Float,
     count: Int,
+    left: Float = 0f,
+    contentOpacity: Float = 1f,
     baseline: () -> Float,
 ): Modifier {
     val density = LocalDensity.current
     val em = with(density) { fontSize.sp.toPx() }
-    val glyph = remember(animation, em, weight, count) {
+    val glyph = remember(text, em, weight, count, scaleX) {
         val paint = Paint().apply {
             textSize = 128f
             textScaleX = scaleX
@@ -207,12 +214,36 @@ internal fun quantumLabelModifier(
     }
     return Modifier.drawWithContent {
         drawContent()
-        val origin = Offset(glyph.offset.x * em, baseline() + glyph.offset.y * em)
+        val origin = Offset(left + glyph.offset.x * em, baseline() + glyph.offset.y * em)
         drawQuantumParticles(glyph.particles, animation, origin, em, outgoing = false)
-    }.graphicsLayer { alpha = animation.contentAlpha }
+    }.graphicsLayer { alpha = animation.contentAlpha * contentOpacity }
 }
 
 private data class QuantumGlyph(val offset: Offset, val particles: List<QuantumParticle>)
+
+internal data class QuantumParticleStyle(val radiusDp: Float, val alpha: Float)
+
+internal fun quantumParticleStyle(fraction: Float, radiusDp: Float): QuantumParticleStyle? =
+    if (fraction in 0f..<1f) QuantumParticleStyle(radiusDp * 0.65f * 1.5f, 1f) else null
+
+internal fun quantumRimFlashStrength(elapsedMillis: Float): Float =
+    if (elapsedMillis >= 0f) (1f - elapsedMillis / QuantumRimFlashMillis).coerceAtLeast(0f) else 0f
+
+@Composable
+internal fun QuantumRimFlash(animation: QuantumAnimation?, modifier: Modifier, tag: String) {
+    if (animation?.effect != QuantumEffect.OpenMap) return
+    val visible by remember(animation) {
+        derivedStateOf { rimStrength(animation) > 0f }
+    }
+    if (visible) Canvas(modifier.testTag(tag)) {
+        val strength = rimStrength(animation)
+        val stroke = (1f + 2f * strength).dp.toPx()
+        drawCircle(HudText, (size.minDimension - stroke) / 2, alpha = strength, style = Stroke(stroke))
+    }
+}
+
+private fun rimStrength(animation: QuantumAnimation): Float =
+    quantumRimFlashStrength(animation.fraction * QuantumTransitionMillis - QuantumTransitionMillis)
 
 internal fun DrawScope.drawQuantumParticles(
     particles: List<QuantumParticle>,
@@ -222,11 +253,11 @@ internal fun DrawScope.drawQuantumParticles(
     outgoing: Boolean,
 ) {
     val fraction = animation.fraction
-    val fade = 1f - quantumContentAlpha(fraction)
-    if (scale <= 0f || fraction < 0f || fade <= 0f) return
-    val frame = quantumTransitionFrame(fraction, outgoing)
-    val alpha = (0.25f + 0.45f * frame.convergence) * fade
+    if (scale <= 0f || !animation.gathering) return
+    val gatherUntil = if (animation.effect == QuantumEffect.OpenMap) 1f else FadeStart
+    val frame = quantumTransitionFrame(fraction, outgoing, gatherUntil)
     for ((index, particle) in particles.withIndex()) {
+        val style = quantumParticleStyle(fraction, particle.radiusDp) ?: continue
         val color = when {
             index % 9 == 0 -> HudDetail
             index % 4 == 0 -> HudText
@@ -234,9 +265,9 @@ internal fun DrawScope.drawQuantumParticles(
         }
         drawCircle(
             color,
-            radius = (particle.radiusDp * 0.65f).dp.toPx(),
+            radius = style.radiusDp.dp.toPx(),
             center = origin + Offset(particle.x(frame) * scale, particle.y(frame) * scale),
-            alpha = alpha,
+            alpha = style.alpha,
         )
     }
 }

@@ -3,10 +3,30 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import kotlin.math.hypot
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QuantumHudMotionTest {
+    @Test
+    fun particlesAreFiftyPercentLargerAndOpaqueOnlyDuringTheEffect() {
+        for (fraction in listOf(0f, 0.5f, 0.95f)) {
+            val style = checkNotNull(quantumParticleStyle(fraction, radiusDp = 2f))
+            assertEquals(2f * 0.65f * 1.5f, style.radiusDp, 0.001f)
+            assertEquals(1f, style.alpha, 0f)
+        }
+        assertNull(quantumParticleStyle(-1f, 2f))
+        assertNull(quantumParticleStyle(1f, 2f))
+        assertNull(quantumParticleStyle(1.2f, 2f))
+    }
+
+    @Test
+    fun rimFlashStartsBrightAndEndsAfterTwoHundredMillis() {
+        assertEquals(0f, quantumRimFlashStrength(-1f), 0f)
+        assertEquals(1f, quantumRimFlashStrength(0f), 0f)
+        assertEquals(0.5f, quantumRimFlashStrength(100f), 0f)
+        assertEquals(0f, quantumRimFlashStrength(200f), 0f)
+    }
     @Test
     fun incomingPointsReachTheirTargetBeforeTheContentFadesIn() {
         val target = QuantumPoint(0.6f, -0.8f)

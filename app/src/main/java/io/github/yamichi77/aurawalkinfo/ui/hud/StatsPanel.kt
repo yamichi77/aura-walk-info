@@ -83,46 +83,46 @@ internal fun StatsPanel(
                 val startup = quantum?.takeIf { it.effect == QuantumEffect.Startup }
                 val effectTag = if (quantum?.drawing == true) Modifier.testTag("quantum-left") else Modifier
                 Column(
-                    Modifier.alpha(opacity).then(effectTag),
+                    effectTag,
                     // Japanese fallback fonts reserve extra interline space even for single-line text.
                     verticalArrangement = Arrangement.spacedBy((-4 * textScale).dp),
                 ) {
-                    if (wallClock != null) CurrentTimeLabel(wallClock, 16 * textScale, startup)
+                    if (wallClock != null) CurrentTimeLabel(wallClock, 16 * textScale, startup, opacity)
                     if (spec.leftPhase == WalkPhase.Standby) {
                         HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx,
-                            quantum = startup, particles = 20)
+                            quantum = startup, particles = 20, opacity = opacity)
                         HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx,
-                            quantum = startup, particles = 12)
+                            quantum = startup, particles = 12, opacity = opacity)
                         return@Column
                     }
                     val summary = spec.leftPhase == WalkPhase.Summary
                     if (summary) HudLabel("おつかれさま", 14 * textScale, HudDetail, widthPx = widthPx,
-                        quantum = quantum, particles = 10)
+                        quantum = quantum, particles = 10, opacity = opacity)
                     Row {
                         HudLabel(
                             spec.distance.number, 32 * textScale, spec.distanceColor,
                             Modifier.alignByBaseline(), weight = FontWeight.Medium,
-                            quantum = quantum, particles = 18,
+                            quantum = quantum, particles = 18, opacity = opacity,
                         )
                         Spacer(Modifier.width((3 * textScale).dp))
                         HudLabel(
                             spec.distance.unit, 16 * textScale, spec.distanceColor,
                             Modifier.alignByBaseline(), weight = FontWeight.Medium,
-                            quantum = quantum, particles = 6,
+                            quantum = quantum, particles = 6, opacity = opacity,
                         )
                     }
-                    HudLabel(spec.walkingTime, 16 * textScale, HudText, quantum = quantum, particles = 12)
+                    HudLabel(spec.walkingTime, 16 * textScale, HudText, quantum = quantum, particles = 12, opacity = opacity)
                     spec.detail?.let {
                         HudLabel(it, 14 * textScale, HudDetail, widthPx = widthPx,
-                            quantum = if (summary) quantum else startup, particles = 8)
+                            quantum = if (summary) quantum else startup, particles = 8, opacity = opacity)
                     }
                     if (summary) {
                         val hint = if (quantum == null) Modifier else Modifier.graphicsLayer { alpha = quantum.contentAlpha }
-                        HudLabel("タップで新しく開始", 14 * textScale, HudDetail, hint, widthPx = widthPx)
+                        HudLabel("タップで新しく開始", 14 * textScale, HudDetail, hint, widthPx = widthPx, opacity = opacity)
                     } else {
                         spec.address.lineSequence().take(spec.addressLines).forEach {
                             HudLabel(it, 14 * textScale, spec.addressColor, widthPx = widthPx,
-                                quantum = startup, particles = 6)
+                                quantum = startup, particles = 6, opacity = opacity)
                         }
                     }
                 }
@@ -132,7 +132,7 @@ internal fun StatsPanel(
 }
 
 @Composable
-private fun CurrentTimeLabel(clock: WallClock, size: Float, startup: QuantumAnimation?) {
+private fun CurrentTimeLabel(clock: WallClock, size: Float, startup: QuantumAnimation?, opacity: Float) {
     val minute by produceState(remember(clock) { clock.now().truncatedTo(ChronoUnit.MINUTES).toLocalTime() }, clock) {
         while (true) {
             val now = clock.now()
@@ -141,7 +141,7 @@ private fun CurrentTimeLabel(clock: WallClock, size: Float, startup: QuantumAnim
         }
     }
     val text = remember(minute) { formatCurrentTime(minute) }
-    HudLabel(text, size, HudAddress, quantum = startup, particles = 12)
+    HudLabel(text, size, HudAddress, quantum = startup, particles = 12, opacity = opacity)
 }
 
 @Composable
@@ -154,6 +154,7 @@ internal fun HudLabel(
     widthPx: Float = Float.POSITIVE_INFINITY,
     quantum: QuantumAnimation? = null,
     particles: Int = 0,
+    opacity: Float = 1f,
 ) {
     val style = TextStyle(
         fontSize = size.sp,
@@ -172,8 +173,10 @@ internal fun HudLabel(
     val baseline = if (quantum != null) remember { mutableFloatStateOf(0f) } else null
     val reveal = if (quantum != null && baseline != null) {
         Modifier.testTag("quantum-label")
-            .then(quantumLabelModifier(quantum, text, size, weight, scaleX, particles) { baseline.floatValue })
-    } else Modifier
+            .then(quantumLabelModifier(quantum, text, size, weight, scaleX, particles, contentOpacity = opacity) {
+                baseline.floatValue
+            })
+    } else Modifier.alpha(opacity)
     Text(
         text = text,
         modifier = modifier.then(reveal),

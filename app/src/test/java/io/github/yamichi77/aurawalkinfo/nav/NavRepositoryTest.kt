@@ -38,11 +38,33 @@ class NavRepositoryTest {
         val destination = NavDestination(candidates.first().point, candidates.first().name)
         assertEquals(NavState.Routing(destination), nav.state.value)
         fixture.fix()
+        val preview = nav.state.value as NavState.Preview
+        assertEquals(destination, preview.destination)
+        assertEquals(fixture.service.route, preview.route)
+        assertEquals(fixture.start, preview.origin.navPoint())
+        fixture.fix(after = 9_000, east = 60.0)
+        assertEquals(preview, nav.state.value)
+        nav.startGuidance()
+        runCurrent()
         assertEquals(destination, (nav.state.value as NavState.Guiding).destination)
         assertEquals(listOf(fixture.start), fixture.service.origins)
         nav.cancel()
         runCurrent()
         assertEquals(NavState.Idle, nav.state.value)
+    }
+
+    @Test
+    fun cancellingPreviewDiscardsTheRouteAndStartDoesNothing() = runTest {
+        val fixture = Fixture(this)
+        fixture.nav.previewTo(fixture.end)
+        runCurrent()
+        fixture.fix()
+        assertTrue(fixture.nav.state.value is NavState.Preview)
+        fixture.nav.cancel()
+        fixture.nav.startGuidance()
+        runCurrent()
+        assertEquals(NavState.Idle, fixture.nav.state.value)
+        assertEquals(1, fixture.service.origins.size)
     }
 
     @Test
