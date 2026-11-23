@@ -18,6 +18,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.xr.arcore.ArDevice
@@ -31,6 +32,7 @@ import androidx.xr.compose.subspace.SubspaceComposable
 import androidx.xr.compose.subspace.animation.follow.FollowMode
 import androidx.xr.compose.subspace.animation.follow.FollowTarget
 import androidx.xr.compose.subspace.animation.follow.TrackedDimensions
+import androidx.xr.compose.subspace.draw.alpha
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.onGloballyPositioned
@@ -47,11 +49,14 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPanel
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPlacementCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
+import io.github.yamichi77.aurawalkinfo.isDebugBuild
+import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
+import java.util.Locale
+
+private const val HeadMotionTag = "AuraHeadMotion"
 
 @OptIn(ExperimentalFollowingSubspaceApi::class)
 @Composable
@@ -66,31 +71,70 @@ internal fun HudScene(
         PhoneScreen(spec, locationDenied, debug, onNoticeTimeout)
         return
     }
+    val debugBuild = LocalContext.current.isDebugBuild()
 
     var configured by remember(session) { mutableStateOf(false) }
-    var tracking by remember(session) { mutableStateOf(false) }
     LaunchedEffect(session) {
         val config = Config.Builder(session.config).setDeviceTracking(DeviceTrackingMode.SPATIAL).build()
         configured = session.config.deviceTracking == DeviceTrackingMode.SPATIAL ||
             session.configure(config) is SessionConfigureSuccess
-        if (configured) {
-            ArDevice.getInstance(session).state.map { it.trackingState == TrackingState.TRACKING }
-                .distinctUntilChanged().collect { tracking = it }
-        } else if (debug.selfCheck) {
-            Log.i("AuraPlacement", "placement FAIL SPATIAL configuration unavailable")
+        if (!configured) {
+            Log.w(HeadMotionTag, "tracking unavailable: SPATIAL configuration failed; motion gate open")
+            if (debug.selfCheck) Log.i("AuraPlacement", "placement FAIL SPATIAL configuration unavailable")
         }
     }
 
-    val check = remember(session, debug.selfCheck) {
-        if (debug.selfCheck) HudPlacementCheck() else null
+    val check = remember(session, debug.selfCheck, debug.grid) {
+        if (debug.selfCheck) HudPlacementCheck(debug.grid) else null
     }
-    var showRotationFallback by remember(session) { mutableStateOf(false) }
-    LaunchedEffect(check, debug.grid) {
-        if (check != null) {
-            val expected = listOf(HudPanel.LEFT, HudPanel.RIGHT) + if (debug.grid) listOf(HudPanel.GRID) else emptyList()
-            showRotationFallback = check.run(session, expected)
+    var showRotationFallback by remember(check) { mutableStateOf(false) }
+    var tracking by remember(session) { mutableStateOf(false) }
+    var hiddenForMotion by remember(session) { mutableStateOf(false) }
+    LaunchedEffect(session, configured, check) {
+        if (!configured) return@LaunchedEffect
+        val device = ArDevice.getInstance(session)
+        val gate = HeadMotionGate()
+        var wasTracking: Boolean? = null
+        var peakSpeed = 0.0
+        var lastSpeedLog = 0L
+        var activeCheck = check
+        while (true) {
+            withFrameNanos { now ->
+                val state = device.state.value
+                val pose = state.devicePose.takeIf { state.trackingState == TrackingState.TRACKING }
+                tracking = pose != null
+                if (tracking && showRotationFallback) showRotationFallback = false
+                if (!tracking && wasTracking != false) {
+                    Log.w(HeadMotionTag, "tracking unavailable: ${state.trackingState}; motion gate open")
+                }
+                wasTracking = tracking
+                val rotation = pose?.rotation?.let {
+                    HeadMotionGate.Rotation(it.x.toDouble(), it.y.toDouble(), it.z.toDouble(), it.w.toDouble())
+                }
+                val speed = gate.update(now, rotation)
+                val hidden = gate.hiddenSinceNanos != null
+                if (debugBuild) {
+                    if (speed != null) peakSpeed = maxOf(peakSpeed, speed)
+                    if (hidden != hiddenForMotion) {
+                        Log.i(HeadMotionTag, "${if (hidden) "HIDE" else "SHOW"} ${formatHeadSpeed(speed, peakSpeed)}")
+                    }
+                    if (now - lastSpeedLog >= 1_000_000_000L) {
+                        Log.i(HeadMotionTag, "SPEED ${formatHeadSpeed(speed, peakSpeed)}")
+                        lastSpeedLog = now
+                    }
+                }
+                hiddenForMotion = hidden
+                activeCheck?.sample(session, now, pose, speed, gate.hiddenSinceNanos)?.let { fallback ->
+                    showRotationFallback = fallback
+                    activeCheck = null
+                }
+            }
         }
     }
+    val motionOpacity = animateFloatAsState(
+        if (hiddenForMotion) 0f else 1f,
+        tween(if (hiddenForMotion) HeadMotionGate.HideMillis else HeadMotionGate.ShowMillis),
+    )
 
     if (!configured || spec is HudVisualSpec.Hidden) return
     Subspace(follow = FollowTarget.view(FollowMode.tight(TrackedDimensions.All))) {
@@ -107,7 +151,8 @@ internal fun HudScene(
             scale?.let {
                 if (tracking || showRotationFallback) {
                     SpatialHudPanels(
-                        session, it, spec, locationDenied, debug, check, tracking, showRotationFallback, onNoticeTimeout,
+                        session, it, spec, locationDenied, debug, check, motionOpacity.value, tracking,
+                        showRotationFallback, onNoticeTimeout,
                     )
                 }
             }
@@ -124,6 +169,7 @@ private fun SpatialHudPanels(
     locationDenied: Boolean,
     debug: HudDebugOptions,
     check: HudPlacementCheck?,
+    motionOpacity: Float,
     tracking: Boolean,
     showRotationFallback: Boolean,
     onNoticeTimeout: () -> Unit,
@@ -135,7 +181,7 @@ private fun SpatialHudPanels(
     if (tracking) {
         PlacedPanel(
             session, HudPanel.LEFT, HudPlacement.statsWidthMeters, HudPlacement.statsHeightMeters,
-            dpPerMeter, scale, check,
+            dpPerMeter, scale, check, motionOpacity,
         ) {
             StatsPanel(
                 spec, locationDenied, Layout.textScale(physicalDpPerMeter),
@@ -147,13 +193,13 @@ private fun SpatialHudPanels(
         if (spec is HudVisualSpec.Clusters && !locationDenied) {
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
-            PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check) {
+            PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
                 MiniMapPanel(
                     spec, debug, Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),
                 )
             }
         } else if (debug.capture && spec is HudVisualSpec.Fast) {
-            PlacedPanel(session, HudPanel.RIGHT, 0.1f, 0.1f, dpPerMeter, scale, null) {
+            PlacedPanel(session, HudPanel.RIGHT, 0.1f, 0.1f, dpPerMeter, scale, null, motionOpacity) {
                 Box(Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")))
             }
         }
@@ -171,6 +217,7 @@ private fun SpatialHudPanels(
             val facing = if (index == 0) pose.rotation else HudPlacement.rotation(-Layout.leftYaw, pitch)
             SpatialPanel(
                 HudPlacement.modifier(Pose(pose.translation, facing), dpPerMeter, scale)
+                    .alpha(motionOpacity)
                     .width((0.07f * physicalDpPerMeter).dp)
                     .height((0.07f * physicalDpPerMeter).dp),
             ) {
@@ -192,10 +239,11 @@ private fun PlacedPanel(
     dpPerMeter: Float,
     scale: Float,
     check: HudPlacementCheck?,
+    motionOpacity: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val pose = remember(name) { HudPlacement.pose(name.yaw, name.pitch) }
-    val placement = HudPlacement.modifier(pose, dpPerMeter, scale)
+    val placement = HudPlacement.modifier(pose, dpPerMeter, scale).alpha(motionOpacity)
     val size = SubspaceModifier.width((width * dpPerMeter / scale).dp)
         .height((height * dpPerMeter / scale).dp)
     if (check == null) {
@@ -223,4 +271,9 @@ private fun PlacedPanel(
             )
         }
     }
+}
+
+private fun formatHeadSpeed(speed: Double?, peak: Double): String {
+    val current = speed?.let { "%.2f".format(Locale.ROOT, it) } ?: "unavailable"
+    return "speed=$current peak=${"%.2f".format(Locale.ROOT, peak)}"
 }
