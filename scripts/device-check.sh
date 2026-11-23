@@ -5,7 +5,8 @@ export MSYS2_ARG_CONV_EXCL='*'
 export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}"
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
-all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
+default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
+all_checks=$default_checks,heading,speech
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -14,7 +15,7 @@ usage() {
 
 parse_args() {
     preview=false
-    only=$all_checks
+    only=$default_checks
     while (( $# > 0 )); do
         case "$1" in
             --preview) preview=true ;;
@@ -581,6 +582,27 @@ wait_for_safety_log() {
     return 1
 }
 
+check_t15_probe() {
+    local mode=$1 timeout result status
+    if [[ $mode == heading ]]; then
+        echo 'heading: 装着して正面を向き、60秒間静止してください。Geospatial を試す場合は画面で同意してください。'
+        timeout=75
+    else
+        echo 'speech: マイクの許可を求められたら許可し、画面に指示が出たら「東京駅」と話してください。'
+        timeout=60
+    fi
+    start_run "$mode" -W --es mode "$mode" || return 0
+    run_log=
+    if wait_for_safety_log "AuraProbe[[:space:]]*: $mode result (PASS|FAIL|SKIP) " "$timeout"; then
+        result=$(awk -v mode="$mode" '$0 ~ ("AuraProbe[[:space:]]*: " mode " result ") { sub(/^.* result /, ""); print }' <<< "$run_log" | tail -n 1)
+        status=${result%% *}
+        record "$status" "$mode ${result#* }"
+    else
+        record FAIL "$mode 診断の終了ログを取得できません"
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+}
+
 refresh_preview() {
     if $preview; then
         # A sleeping display draws at launch, but may skip later frames.
@@ -690,6 +712,8 @@ main() {
     if ! $preview && selected input; then check_input; fi
     if ! $preview && selected bigmap; then check_bigmap; fi
     if selected session; then check_session; fi
+    if selected heading; then check_t15_probe heading; fi
+    if selected speech; then check_t15_probe speech; fi
     summary
     return "$failed"
 }

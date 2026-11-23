@@ -68,4 +68,5 @@ private fun Location.toSample() = LocationSample(
     accuracyMeters = if (hasAccuracy()) accuracy else Float.POSITIVE_INFINITY,
     speedMps = speed.takeIf { hasSpeed() },
     bearingDeg = bearing.takeIf { hasBearing() },
+    bearingAccuracyDeg = bearingAccuracyDegrees.takeIf { hasBearingAccuracy() },
 )

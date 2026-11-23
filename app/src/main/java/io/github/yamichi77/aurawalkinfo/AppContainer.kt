@@ -13,6 +13,8 @@ import com.google.android.gms.location.LocationServices
 import io.github.yamichi77.aurawalkinfo.diagnostics.fieldlog.FieldLogProvider
 import io.github.yamichi77.aurawalkinfo.diagnostics.fieldlog.FieldLogWriter
 import io.github.yamichi77.aurawalkinfo.diagnostics.replay.ReplayController
+import io.github.yamichi77.aurawalkinfo.heading.HeadPoseSource
+import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.location.AddressRepository
 import io.github.yamichi77.aurawalkinfo.location.AndroidReverseGeocoder
 import io.github.yamichi77.aurawalkinfo.location.FusedLocationRepository
@@ -38,6 +40,8 @@ import kotlinx.coroutines.flow.onStart
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     private val clock = Clock(SystemClock::elapsedRealtime)
+    internal val headPoses = HeadPoseSource()
+    internal val headingTracking = HeadingTracking()
     private val locationProvider: LocationRepository by lazy {
         if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(appContext) ==
             ConnectionResult.SUCCESS
@@ -72,6 +76,7 @@ class AppContainer(context: Context) {
         locations = permissionGatedLocation,
         clock = clock,
         addresses = addresses::observe,
+        heading = headingTracking,
         record = if (debuggable) { rows ->
             val provider = if (locationProvider is FusedLocationRepository) FieldLogProvider.FUSED else FieldLogProvider.GPS
             try {

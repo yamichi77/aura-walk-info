@@ -22,6 +22,11 @@ PowerShell 7.4 未満では外部コマンドの出力を `>` で保存する際
 | `added_distance_m` | 区間中に加算した距離（m） |
 | `fix_decision` | `ACCEPTED`、`POOR_ACCURACY`（精度不足）、`TOO_LITTLE_MOVEMENT`（移動量不足）、`NOT_WALKING`（歩行中でない）、`NO_SAMPLE` |
 | `provider` | アプリが選んだ測位プロバイダ（`fused` / `gps`） |
+| `ar_tracking` | 区間末の頭部追跡状態（`TRACKING` / `PAUSED` / `STOPPED`）。追跡の入力がなければ空欄 |
+| `ar_x_m`、`ar_z_m` | 区間末の頭部の相対位置（m）。XR の姿勢観測開始時に最初に取得できた追跡位置が原点。追跡中の値がなければ空欄 |
+| `ar_yaw_deg` | 区間末の頭部の yaw（度、ARCore の座標系）。水平成分が求まらなければ空欄 |
+| `gps_bearing_deg`、`gps_bearing_acc_deg`、`gps_speed_mps` | 区間内の最後の測位の進行方位（北 0°、時計回り）、方位精度（度）、速度（m/s）。測位または個別の値がなければ空欄 |
+| `north_offset_deg`、`north_uncertainty_deg` | 区間末の北オフセットと推定の不確かさ（度）。推定がなければ空欄 |
 
 ## 合成ルートの実機確認
 

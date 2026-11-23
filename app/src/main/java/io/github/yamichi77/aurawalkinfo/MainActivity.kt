@@ -28,7 +28,9 @@ import androidx.xr.compose.platform.LocalSpatialCapabilities
 import io.github.yamichi77.aurawalkinfo.diagnostics.DiagnosticsScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.HEAD_TRACKING
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
+import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
@@ -76,7 +78,8 @@ class MainActivity : ComponentActivity() {
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         val debugBuild = isDebugBuild()
         val mode = if (debugBuild) intent.getStringExtra("mode") else null
-        val probe = mode == "probe" || mode == "map" || mode == "maplite"
+        val headingSpeech = mode == "heading" || mode == "speech"
+        val probe = mode == "probe" || mode == "map" || mode == "maplite" || headingSpeech
         val debug = if (debugBuild) HudDebugOptions.from(intent) else HudDebugOptions()
         fakeMotion = debug.fakeState?.motionState
         val notice = container.safetyNotice
@@ -121,7 +124,9 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             AdditiveDisplayTheme {
-                if (probe) {
+                if (headingSpeech) {
+                    HeadingSpeechScreen(this, requireNotNull(mode), container.headPoses)
+                } else if (probe) {
                     DiagnosticsScreen(this, mode, debug.capture)
                 } else {
                     val state by repository.state.collectAsStateWithLifecycle()
@@ -133,6 +138,10 @@ class MainActivity : ComponentActivity() {
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
                     val denied = !locationGranted && debug.fakeState == null
                     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled && !debug.preview2d
+                    ObserveHeadPoses(
+                        container.headPoses, container.headingTracking,
+                        enabled = spatial && headTrackingGranted && debug.fakeState == null,
+                    )
                     if (debug.fakeState != null || debug.grid || debug.capture) {
                         LaunchedEffect(spatial, headTrackingGranted) {
                             val route = when {
