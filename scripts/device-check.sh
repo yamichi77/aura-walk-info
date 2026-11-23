@@ -6,6 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
+all_checks+=,map3d
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -654,6 +655,43 @@ check_safety() {
     replay_scenario stop || record FAIL 'T6b 再生停止'
 }
 
+check_map3d() {
+    if $preview; then
+        record SKIP 'map3d（装着が必要）'
+        return 0
+    fi
+    start_run map3d -W --es mode map3d || return 0
+    local deadline=$((SECONDS + 45)) logs= name file
+    while (( SECONDS < deadline )); do
+        logs=$(map_log) || break
+        if grep -Eq 'map3d (DONE|SKIP key=missing|FAIL spatial UI unavailable)' <<< "$logs"; then break; fi
+        sleep 1
+    done
+    printf '%s\n' "$logs" >> "$log"
+    if grep -Fq 'map3d SKIP key=missing' <<< "$logs"; then
+        record SKIP 'map3d（キーなし）'
+        return 0
+    fi
+    if ! grep -Fq 'map3d DONE' <<< "$logs"; then
+        record FAIL 'map3d 空間パネルでの4条件の表示'
+    fi
+    for name in 2d t45 t60 t675; do
+        file="$shots/map3d-$name.png"
+        if grep -Eq "map3d case=$name .* PASS " <<< "$logs"; then
+            record PASS "map3d $name 描画とカメラ"
+        else
+            record FAIL "map3d $name 描画とカメラ"
+        fi
+        if grep -Eq "map3d case=$name .* snapshot=map3d-$name\.png" <<< "$logs" &&
+            adb_retry exec-out run-as "$pkg" cat "files/map3d-$name.png" > "$file" &&
+            [[ $(od -An -tx1 -N8 "$file" | tr -d ' \r\n') == 89504e470d0a1a0a ]]; then
+            record PASS "map3d $name snapshot PNG"
+        else
+            record FAIL "map3d $name snapshot PNG"
+        fi
+    done
+}
+
 main() {
     parse_args "$@" || return 1
     cd "$(dirname "${BASH_SOURCE[0]}")/.." || return 1
@@ -690,6 +728,7 @@ main() {
     if ! $preview && selected input; then check_input; fi
     if ! $preview && selected bigmap; then check_bigmap; fi
     if selected session; then check_session; fi
+    if selected map3d; then check_map3d; fi
     summary
     return "$failed"
 }

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Outline
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -15,7 +16,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,13 +28,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMapOptions
 import com.google.android.gms.maps.MapView
@@ -45,9 +52,11 @@ import com.google.maps.android.compose.MapsComposeExperimentalApi
 import com.google.maps.android.compose.rememberCameraPositionState
 import io.github.yamichi77.aurawalkinfo.R
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.diagnostics.Map3dSnapshotCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.saveProbePng
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
+import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -64,6 +73,9 @@ internal const val MAP_LOG_TAG = "AuraMap"
 private const val SNAPSHOT_FILE = "minimap-snapshot.png"
 private const val MAP_ZOOM = 17.5f
 private const val CAMERA_ANIMATION_MS = 500
+private val bigMapModeHitFraction = HudPlacement.planeHalfSpan(1.5f) * 2 / HudPlacement.bigMapSizeMeters
+
+internal fun centeredMapPadding(diameter: Dp) = PaddingValues(diameter * 0.15f)
 
 internal fun northUpCameraPosition(center: MapCenter, zoom: Float) =
     CameraPosition(LatLng(center.latitude, center.longitude), zoom, 0f, 0f)
@@ -95,8 +107,7 @@ internal fun MiniMapPanel(
     spec: HudVisualSpec.Clusters,
     debug: HudDebugOptions,
     modifier: Modifier = Modifier,
-    zoom: Float = MAP_ZOOM,
-    @RawRes mapStyle: Int = R.raw.map_style_dark,
+    bigMapMode: BigMapMode? = null,
     arrowHeight: Dp? = null,
 ) {
     val context = LocalContext.current
@@ -116,18 +127,19 @@ internal fun MiniMapPanel(
 
     BoxWithConstraints(modifier) {
         if (center != null && hasKey) {
-            val position = northUpCameraPosition(center, zoom)
+            val position = bigMapMode?.cameraPosition(center) ?: northUpCameraPosition(center, MAP_ZOOM)
             if (selfCheck) {
                 LaunchedEffect(position) {
                     Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}")
                 }
             }
-            // Equal padding keeps SDK attribution inside the circle and the camera target centered.
-            val padding = PaddingValues(minOf(maxWidth, maxHeight) * 0.15f)
+            // Maps projects the GPS target to the center of the padded area, including at a tilt.
+            val padding = centeredMapPadding(minOf(maxWidth, maxHeight))
             MiniMapSurface(
                 position, padding, selfCheck, checkSnapshot = selfCheck && debug.fakeState != null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
-                mapStyle = mapStyle,
+                mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
+                buildingsEnabled = bigMapMode?.buildingsEnabled == true,
             )
         }
         MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
@@ -143,38 +155,58 @@ internal fun ClickableMap(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     bigMapArrowHeight: Dp? = null,
+    bigMapMode: BigMapMode = BigMapMode.FLAT,
 ) {
-    Box(modifier) {
-        val large = target == HudTarget.BIGMAP
-        MiniMapPanel(
-            spec = if (large) spec.copy(
-                opacity = spec.opacity, mapOpacity = spec.opacity, mapLineOpacity = 0.4f,
-                mapDiameter = HudPlacement.bigMapDiameter,
-            ) else spec,
-            debug = if (large) debug.copy(selfCheck = false) else debug,
-            modifier = Modifier.matchParentSize(),
-            zoom = if (large) 16.5f else MAP_ZOOM,
-            mapStyle = if (large) R.raw.map_style_dark_bigmap else R.raw.map_style_dark,
-            arrowHeight = bigMapArrowHeight,
-        )
-        Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
+    if (target == HudTarget.BIGMAP) {
+        BoxWithConstraints(modifier) {
+            val diameter = minOf(maxHeight, maxWidth)
+            val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
+            MiniMapPanel(
+                spec = spec.copy(mapOpacity = spec.opacity, mapLineOpacity = 0.4f, mapDiameter = HudPlacement.bigMapDiameter),
+                debug = debug.copy(selfCheck = false),
+                modifier = Modifier.matchParentSize(),
+                arrowHeight = bigMapArrowHeight,
+                bigMapMode = bigMapMode,
+            )
+            Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
+            Box(
+                Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = diameter * 0.01f)
+                    .size(diameter * bigMapModeHitFraction)
+                    .hudClick(HudTarget.BIGMAP_MODE, onTap, enabled),
+                contentAlignment = Alignment.Center,
+            ) {
+                val labelSize = with(LocalDensity.current) { 14.dp.toSp() }
+                Text(
+                    bigMapMode.toggleLabel, Modifier.alpha(opacity), color = HudText,
+                    fontSize = labelSize, lineHeight = labelSize, maxLines = 1,
+                )
+            }
+        }
+    } else {
+        Box(modifier) {
+            MiniMapPanel(spec, debug, Modifier.matchParentSize())
+            Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
+        }
     }
 }
 
 @OptIn(MapsComposeExperimentalApi::class)
 @Composable
-private fun MiniMapSurface(
+internal fun MiniMapSurface(
     position: CameraPosition,
     padding: PaddingValues,
     selfCheck: Boolean,
     checkSnapshot: Boolean,
     modifier: Modifier,
     @RawRes mapStyle: Int,
+    buildingsEnabled: Boolean,
+    probeCase: String? = null,
 ) {
     val context = LocalContext.current
-    val properties = remember(context, mapStyle) {
+    val properties = remember(context, mapStyle, buildingsEnabled) {
         MapProperties(
-            isBuildingEnabled = false,
+            isBuildingEnabled = buildingsEnabled,
             isIndoorEnabled = false,
             isMyLocationEnabled = false,
             mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, mapStyle),
@@ -182,17 +214,19 @@ private fun MiniMapSurface(
     }
     val camera = rememberCameraPositionState { this.position = position }
     val target by rememberUpdatedState(position)
-    val loaded = remember { CompletableDeferred<Unit>() }
+    val startedAt = remember { SystemClock.elapsedRealtime() }
+    val loaded = remember { CompletableDeferred<Long>() }
     val sdkMap = remember { CompletableDeferred<SdkMap>() }
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
+    val captureSnapshot = checkSnapshot || probeCase != null
     GoogleMap(
-        modifier = if (checkSnapshot) modifier.onSizeChanged { mapSize = it } else modifier,
+        modifier = if (captureSnapshot) modifier.onSizeChanged { mapSize = it } else modifier,
         cameraPositionState = camera,
         googleMapOptionsFactory = { GoogleMapOptions().backgroundColor(android.graphics.Color.BLACK) },
         properties = properties,
         uiSettings = mapUi,
         contentPadding = padding,
-        onMapLoaded = if (checkSnapshot) ({ loaded.complete(Unit) }) else null,
+        onMapLoaded = if (captureSnapshot) ({ loaded.complete(SystemClock.elapsedRealtime() - startedAt) }) else null,
         mapViewFactory = { viewContext, options ->
             MapView(viewContext, options).apply {
                 // AndroidView needs a native outline to clip its embedded map view.
@@ -201,8 +235,8 @@ private fun MiniMapSurface(
             }
         },
     ) {
-        MapEffect(selfCheck, checkSnapshot) { map ->
-            if (checkSnapshot) sdkMap.complete(map)
+        MapEffect(selfCheck, captureSnapshot) { map ->
+            if (captureSnapshot) sdkMap.complete(map)
             // Finish each animation and use the latest pending fix if updates arrive faster than it.
             snapshotFlow { target }.conflate().collect { next ->
                 if (camera.position != next) {
@@ -217,7 +251,9 @@ private fun MiniMapSurface(
             }
         }
     }
-    if (checkSnapshot) {
+    if (probeCase != null) {
+        Map3dSnapshotCheck(probeCase, position, loaded, sdkMap) { mapSize }
+    } else if (checkSnapshot) {
         LaunchedEffect(sdkMap, loaded) {
             try {
                 val map = withTimeoutOrNull(20_000L) {
@@ -238,7 +274,7 @@ private fun MiniMapSurface(
     }
 }
 
-private fun Context.hasMapsKey(): Boolean {
+internal fun Context.hasMapsKey(): Boolean {
     val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
     val key = info.metaData?.getString("com.google.android.geo.API_KEY")
     return !key.isNullOrBlank() && key != "DEFAULT_API_KEY"

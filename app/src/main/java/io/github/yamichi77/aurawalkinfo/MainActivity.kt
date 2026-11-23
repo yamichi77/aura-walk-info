@@ -36,6 +36,7 @@ import io.github.yamichi77.aurawalkinfo.session.SessionStartMode
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapControl
+import io.github.yamichi77.aurawalkinfo.ui.hud.BigMapMode
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     private var locationGranted by mutableStateOf(false)
     private var headTrackingGranted by mutableStateOf(false)
+    private var bigMap3d by mutableStateOf(false)
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshPermissions()
     }
@@ -76,7 +78,7 @@ class MainActivity : ComponentActivity() {
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         val debugBuild = isDebugBuild()
         val mode = if (debugBuild) intent.getStringExtra("mode") else null
-        val probe = mode == "probe" || mode == "map" || mode == "maplite"
+        val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d"
         val debug = if (debugBuild) HudDebugOptions.from(intent) else HudDebugOptions()
         fakeMotion = debug.fakeState?.motionState
         val notice = container.safetyNotice
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
         }
         val repository = container.walkSessionRepository
         if (!probe) {
+            bigMap3d = container.hudSettings.bigMap3d
             if (!controls.initialized) {
                 val startMode = debug.startMode ?: DefaultSessionStartMode
                 controls.phase = if (debug.fakeState != null || startMode == SessionStartMode.AUTO) {
@@ -131,6 +134,7 @@ class MainActivity : ComponentActivity() {
                         startingFromSummary = controls.startingFromSummary,
                     )
                     val onTap: (HudTarget) -> Unit = { target -> handleTap(target, "compose") }
+                    val bigMapMode = if (bigMap3d) BigMapMode.TILTED else BigMapMode.FLAT
                     val denied = !locationGranted && debug.fakeState == null
                     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled && !debug.preview2d
                     if (debug.fakeState != null || debug.grid || debug.capture) {
@@ -147,13 +151,14 @@ class MainActivity : ComponentActivity() {
                         if (headTrackingGranted) {
                             HudScene(
                                 spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                                controls.quantumStartup, container.wallClock, onTap,
+                                controls.quantumStartup, container.wallClock, bigMapMode, onTap,
                             )
                         }
                     } else {
                         PhoneScreen(
                             spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                            quantumStartup = controls.quantumStartup, wallClock = container.wallClock, onTap = onTap,
+                            quantumStartup = controls.quantumStartup, wallClock = container.wallClock,
+                            bigMapMode = bigMapMode, onTap = onTap,
                         )
                     }
                 }
@@ -232,6 +237,11 @@ class MainActivity : ComponentActivity() {
                 if (isDebugBuild()) Log.i("AuraHud", "notice dismissed by tap")
             } else if (hit == HudTarget.LEFT || hit == HudTarget.COUNTDOWN && countingDown) {
                 setPhase(controls.phase.tap(now, motion))
+            } else if (hit == HudTarget.BIGMAP_MODE) {
+                if (controls.map.isOpen) {
+                    bigMap3d = !bigMap3d
+                    container.hudSettings.bigMap3d = bigMap3d
+                }
             } else {
                 setMap(controls.map.tap(hit, now, motion), now, "tap")
             }

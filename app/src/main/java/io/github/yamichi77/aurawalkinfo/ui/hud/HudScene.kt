@@ -73,13 +73,14 @@ internal fun HudScene(
     bigMapOpen: Boolean,
     quantumStartup: HudQuantumStartup,
     wallClock: WallClock,
+    bigMapMode: BigMapMode,
     onTap: (HudTarget) -> Unit,
 ) {
     val session = LocalSession.current
     if (session == null) {
         PhoneScreen(
             spec, locationDenied, debug, onNoticeTimeout, bigMapOpen,
-            quantumStartup = quantumStartup, wallClock = wallClock, onTap = onTap,
+            quantumStartup = quantumStartup, wallClock = wallClock, bigMapMode = bigMapMode, onTap = onTap,
         )
         return
     }
@@ -176,7 +177,7 @@ internal fun HudScene(
                     SpatialHudPanels(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
                         showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
-                        !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock,
+                        !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock, bigMapMode,
                     )
                 }
             }
@@ -203,6 +204,7 @@ private fun SpatialHudPanels(
     countdown: CountdownPresentation?,
     quantum: HudQuantum,
     wallClock: WallClock,
+    bigMapMode: BigMapMode,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -278,6 +280,7 @@ private fun SpatialHudPanels(
                     ClickableMap(
                         spec, debug, HudTarget.BIGMAP, onTap, mapModifier, showBigMap && inputEnabled,
                         bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * physicalDpPerMeter).dp,
+                        bigMapMode = bigMapMode,
                     )
                 }
             }
