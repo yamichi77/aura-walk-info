@@ -10,7 +10,7 @@ T23 の空間の印は、GPS と北の推定（T15）で位置を決めている
 
 ## 決定事項
 
-- **認証はキーレス**（Android の OAuth クライアント ID。ユーザーが Google Cloud で作る）。API キーをマニフェストやコードや `local.properties` に**置かない**。ARCore for Jetpack XR のキーレスの設定方法を、`gradle/libs.versions.toml` のバージョンのライブラリと公式のセットアップ手順（https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/geospatial/setup ）で確かめて設定する
+- **認証は今の Maps の API キーを使う**（ユーザーが Google Cloud で ARCore API を有効にし、キーの「API の制限」に足す）。マニフェストの `<application>` に `<meta-data android:name="com.google.android.ar.API_KEY" android:value="${MAPS_API_KEY}" />` を足し、今の `com.google.android.geo.API_KEY` と同じプレースホルダーでキーを渡す。**キーの値をコードやリポジトリに書かない**（`local.properties` から secrets-gradle-plugin で入る今の仕組みのまま）。設定の詳細は、`gradle/libs.versions.toml` のバージョンのライブラリと公式のセットアップ手順（https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/geospatial/setup ）で確かめる
 - **利用の確認:** VPS はカメラの映像を位置合わせのために Google に送る。初めて VPS を使う前に、左クラスタの位置に短い確認の文（例: `位置合わせのためカメラの映像を Google に送ります。使いますか？`）と `使う` / `使わない` のボタン（T22 の丸いボタンと同じ見た目）を出し、答えを保存する。`使わない` なら VPS を有効にしない（GPS と北の推定のまま）。デバッグ用の `SETTINGS` ブロードキャストで答えを消せるようにする。文言は公式の要件を満たすよう調べて決め、最終報告に書く
 - **使う条件:** `Geospatial` の状態が RUNNING で、水平の精度 ≤ 5m かつ向き（yaw）の精度 ≤ 5° のときだけ VPS の値を使う（定数）。それ以外、または追跡が途切れたら、GPS と北の推定（T15・T23）に戻す。切り替わるときに印が跳ねないよう、T23 の滑らかな移動を使う
 - **場所ごとの可否:** 起動時と、大きく移動したとき（500m 以上）に `checkVpsAvailability` を呼び、VPS が使えない場所では VPS の状態を待たずに GPS に戻す
@@ -31,4 +31,4 @@ T23 の空間の印は、GPS と北の推定（T15）で位置を決めている
 
 - 上の確認がすべて通る
 - UI.md と PLAN.md を変更していない
-- API キーや OAuth の秘密情報がリポジトリに無い
+- API キーの値がリポジトリに無い（マニフェストはプレースホルダーだけ）
