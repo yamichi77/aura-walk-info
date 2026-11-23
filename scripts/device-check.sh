@@ -5,7 +5,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}"
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
-all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
+all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session,ble,pics
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -112,6 +112,10 @@ prepare() {
             return 1
         fi
     done
+    if selected ble && ! adb_retry shell pm grant "$pkg" android.permission.BLUETOOTH_SCAN 2>&1 | tee -a "$log"; then
+        record FAIL 'pm grant BLUETOOTH_SCAN'
+        return 1
+    fi
     record PASS 'pm grant'
 }
 
@@ -574,7 +578,7 @@ wait_for_safety_log() {
     [[ $pid =~ ^[0-9]+$ ]] || return 1
     run_log=
     while (( SECONDS < deadline )); do
-        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud) || return 1
+        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics) || return 1
         if grep -Eq "$pattern" <<< "$run_log"; then return 0; fi
         sleep 0.25
     done
@@ -588,6 +592,47 @@ refresh_preview() {
         adb_retry shell am start -W --activity-single-top -n "$pkg/.MainActivity" \
             --ez preview2d true --ez capture true "$@" >> "$log"
     fi
+}
+
+check_ble() {
+    run_log=
+    start_run t17a-ble -W --es mode ble || return 0
+    if wait_for_safety_log 'AuraProbe[[:space:]]*: BLE (PASS|FAIL|SKIP) ' 26 &&
+        grep -Eq 'AuraProbe[[:space:]]*: BLE PASS results=' <<< "$run_log"; then
+        record PASS 'ble 20秒の受信集計'
+    else
+        record FAIL 'ble 20秒の受信集計'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+}
+
+pics_scenario() {
+    adb_retry shell am broadcast -a "$pkg.PICS_REPLAY" -p "$pkg" --es scenario "$1" >> "$log"
+}
+
+check_pics() {
+    local args=(-W --es fakeState stopped)
+    if $preview; then args+=(--ez preview2d true); fi
+    run_log=
+    start_run t17a-pics "${args[@]}" || return 0
+    if wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5 &&
+        pics_scenario red_to_green &&
+        wait_for_safety_log 'AuraPics[[:space:]]*: PICS scenario=red_to_green phase=HIDDEN' 9 &&
+        awk '
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=FRESH aspect=RED remaining=3/ { red = 1 }
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=FRESH aspect=RED remaining=1/ && red { reduced = 1 }
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=FRESH aspect=FLASHING_GREEN/ && reduced { flashing = 1 }
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=FRESH aspect=GREEN/ && flashing { green = 1 }
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=STALE aspect=GREEN/ && green { stale = 1 }
+            /AuraPics[[:space:]]*: PICS scenario=red_to_green phase=HIDDEN/ && stale { hidden = 1 }
+            END { exit !hidden }
+        ' <<< "$run_log"; then
+        record PASS 'pics 赤から青への遷移と受信途絶後の失効'
+    else
+        record FAIL 'pics 赤から青への遷移と受信途絶後の失効'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    pics_scenario stop || record FAIL 'pics 再生停止'
 }
 
 save_safety_log() {
@@ -690,6 +735,8 @@ main() {
     if ! $preview && selected input; then check_input; fi
     if ! $preview && selected bigmap; then check_bigmap; fi
     if selected session; then check_session; fi
+    if selected ble; then check_ble; fi
+    if selected pics; then check_pics; fi
     summary
     return "$failed"
 }

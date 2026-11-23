@@ -20,15 +20,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.xr.compose.platform.LocalSpatialCapabilities
 import io.github.yamichi77.aurawalkinfo.diagnostics.DiagnosticsScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.HEAD_TRACKING
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
+import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
+import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
@@ -43,6 +47,8 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 internal const val DEBUG_TAP_ACTION = "io.github.yamichi77.aurawalkinfo.DEBUG_TAP"
@@ -66,8 +72,10 @@ class MainActivity : ComponentActivity() {
 
     private var locationGranted by mutableStateOf(false)
     private var headTrackingGranted by mutableStateOf(false)
+    private val bleProbePermissionsReady = MutableStateFlow(false)
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshPermissions()
+        bleProbePermissionsReady.value = true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +90,33 @@ class MainActivity : ComponentActivity() {
         val notice = container.safetyNotice
         visibility = HudVisibility(notice, debug.resetNotice || (debug.fakeState == null && !notice.hasBeenShown))
         refreshPermissions()
+        if (mode == "ble") {
+            val missing = buildList {
+                if (supportsPicsBle()) {
+                    if (!locationGranted) {
+                        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                        add(Manifest.permission.ACCESS_FINE_LOCATION)
+                    }
+                    if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) add(Manifest.permission.BLUETOOTH_SCAN)
+                }
+            }
+            if (missing.isEmpty() || savedInstanceState != null) {
+                bleProbePermissionsReady.value = true
+            } else {
+                permissions.launch(missing.toTypedArray())
+            }
+            lifecycleScope.launch {
+                var finished = false
+                repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    if (!finished) {
+                        bleProbePermissionsReady.first { it }
+                        runPicsBleProbe(this@MainActivity)
+                        finished = true
+                    }
+                }
+            }
+            return
+        }
         if (savedInstanceState == null && !probe && debug.fakeState == null) {
             val missing = buildList {
                 if (!locationGranted) {
@@ -90,6 +125,9 @@ class MainActivity : ComponentActivity() {
                 }
                 if (!headTrackingGranted && packageManager.hasSystemFeature("android.software.xr.api.spatial")) {
                     add(HEAD_TRACKING)
+                }
+                if (supportsPicsBle() && !hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
+                    add(Manifest.permission.BLUETOOTH_SCAN)
                 }
             }
             if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray())
@@ -118,6 +156,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (debugBuild) registerDebugTap()
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    container.picsReceiver.runForeground(repository.state, debug.fakeState)
+                }
+            }
         }
         setContent {
             AdditiveDisplayTheme {
