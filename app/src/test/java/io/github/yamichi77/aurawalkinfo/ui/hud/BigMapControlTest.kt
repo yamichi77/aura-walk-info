@@ -92,14 +92,30 @@ class BigMapControlTest {
     }
 
     @Test
-    fun fastClosesImmediatelyAndRefusesToOpenAndBothTargetsCloseManually() {
+    fun fastClosesImmediatelyAndOnlyTheOutsideTapClosesManually() {
         val fast = MotionState.FAST
         val stopped = MotionState.STOPPED
         val opened = closed.tap(HudTarget.MAP, 0, stopped)
         assertEquals(closed, opened.advance(1, fast))
         assertEquals(closed, closed.tap(HudTarget.MAP, 1, fast))
-        assertEquals(closed, opened.tap(HudTarget.BIGMAP, 1, stopped))
+        assertEquals(opened, opened.tap(HudTarget.BIGMAP, 1, stopped))
         assertEquals(closed, opened.tap(HudTarget.OUTSIDE, 1, stopped))
+    }
+
+    @Test
+    fun everyMapOperationRenewsTheDeadlineAndRespectsStoppedDestinationInput() {
+        val buttons = HudPlacement.bigMapButtons.map { it.target } + destinationCandidateTargets + HudTarget.NAV_CANCEL
+        for (motion in listOf(MotionState.STOPPED, MotionState.WALKING, MotionState.NO_FIX)) {
+            val opened = closed.tap(HudTarget.MAP, 0, motion)
+            val deadline = if (motion == MotionState.STOPPED) 35_000L else 15_000L
+            buttons.forEach { assertEquals(it.name, deadline, opened.tap(it, 5_000L, motion).closesAt) }
+            // Dragging and holding use the same interaction path without synthesizing a button tap.
+            assertEquals(deadline, opened.interact(5_000L, motion, destinationInput = false).closesAt)
+            val entering = opened.interact(5_000L, motion, destinationInput = true)
+            assertEquals(if (motion == MotionState.STOPPED) null else deadline, entering.closesAt)
+            assertEquals(closed, entering.interact(5_001L, MotionState.FAST, destinationInput = true))
+            assertEquals(closed, opened.interact(deadline, motion, destinationInput = false))
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

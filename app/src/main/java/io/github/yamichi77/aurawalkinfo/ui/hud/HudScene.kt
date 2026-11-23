@@ -55,6 +55,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
 import io.github.yamichi77.aurawalkinfo.diagnostics.capturePanelOnNextDraw
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
+import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
 import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
@@ -81,12 +82,16 @@ internal fun HudScene(
     headingTracking: HeadingTracking,
     skyBandTargets: SkyBandTargets,
     showGeospatialConsent: Boolean = false,
+    viewport: BigMapViewport,
+    onMapPan: () -> Unit,
+    onMapHold: (NavPoint) -> Unit,
 ) {
     val session = LocalSession.current
     if (session == null) {
         PhoneScreen(
             spec, locationDenied, debug, onNoticeTimeout, bigMapOpen,
             quantumStartup = quantumStartup, wallClock = wallClock, bigMapMode = bigMapMode, onTap = onTap,
+            viewport = viewport, onMapPan = onMapPan, onMapHold = onMapHold,
         )
         return
     }
@@ -191,6 +196,7 @@ internal fun HudScene(
                         showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
                         !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock, bigMapMode,
                         headingTracking, skyBandSettings.takeIf { showGeospatialConsent },
+                        viewport, onMapPan, onMapHold,
                     )
                 }
             }
@@ -220,6 +226,9 @@ private fun SpatialHudPanels(
     bigMapMode: BigMapMode,
     headingTracking: HeadingTracking?,
     geospatialSettings: SkyBandSettings?,
+    viewport: BigMapViewport,
+    onMapPan: () -> Unit,
+    onMapHold: (NavPoint) -> Unit,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -277,7 +286,7 @@ private fun SpatialHudPanels(
         if (spec is HudVisualSpec.Clusters && !locationDenied) {
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
-            spec.navigation?.let { visual ->
+            spec.rightClusterNavigation(showBigMap)?.let { visual ->
                 SpatialNavGuidance(visual, size, dpPerMeter, scale, spec.opacity, motionOpacity, headingTracking)
             }
             if (!showBigMap) PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
@@ -306,20 +315,18 @@ private fun SpatialHudPanels(
                         spec, debug, HudTarget.BIGMAP, onTap, mapModifier, showBigMap && inputEnabled,
                         bigMapArrowHeight = (HudPlacement.bigMapArrowHeightMeters * physicalDpPerMeter).dp,
                         bigMapMode = bigMapMode,
+                        viewport = viewport, onMapPan = onMapPan, onMapHold = onMapHold,
                     )
                 }
             }
             val destinationLabel = rememberBigMapDestinationLabel(spec, showBigMap)
-            SpatialBigMapButton(
-                HudPlacement.bigMapDestinationButton, destinationLabel, HudTarget.NAV_DESTINATION,
-                spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,
-                dpPerMeter, scale, motionOpacity * bigMapAlpha,
-            )
-            SpatialBigMapButton(
-                HudPlacement.bigMapModeButton, bigMapMode.toggleLabel, HudTarget.BIGMAP_MODE,
-                spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,
-                dpPerMeter, scale, motionOpacity * bigMapAlpha,
-            )
+            for (button in HudPlacement.bigMapButtons) {
+                SpatialBigMapButton(
+                    button, button.buttonLabel(destinationLabel, bigMapMode), button.target,
+                    spec.opacity, bigMapQuantum, showBigMap, showBigMap && inputEnabled, onTap,
+                    dpPerMeter, scale, motionOpacity * bigMapAlpha,
+                )
+            }
         }
     }
 

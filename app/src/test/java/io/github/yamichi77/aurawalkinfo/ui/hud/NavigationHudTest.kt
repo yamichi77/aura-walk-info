@@ -4,6 +4,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
@@ -18,6 +19,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.replay.syntheticFix
 import io.github.yamichi77.aurawalkinfo.location.LocationSample
+import io.github.yamichi77.aurawalkinfo.location.AddressParts
 import io.github.yamichi77.aurawalkinfo.nav.DestinationSpeech
 import io.github.yamichi77.aurawalkinfo.nav.MicrophoneDenied
 import io.github.yamichi77.aurawalkinfo.nav.NavCandidate
@@ -93,7 +95,9 @@ class NavigationHudTest {
             assertEquals(10_000L, f.map.closesAt)
         }
 
-        tap("bigmap")
+        text("40m先 右").assertDoesNotExist()
+        text("残り 91m・2分").assertDoesNotExist()
+        tapOutside()
         text("40m先 右").assertIsDisplayed()
         text("残り 91m・2分").assertIsDisplayed()
     }
@@ -141,7 +145,7 @@ class NavigationHudTest {
         f.recognized = CompletableDeferred()
         tap("nav_destination")
         text("話してください").assertIsDisplayed()
-        tap("bigmap")
+        tapOutside()
         text("話してください").assertDoesNotExist()
         assertEquals(2, f.speechExits)
         assertEquals(NavState.Idle, f.nav.state.value)
@@ -204,12 +208,31 @@ class NavigationHudTest {
         tap("map")
         speak(f)
         text("検索中…").assertIsDisplayed()
-        tap("bigmap")
+        tapOutside()
         compose.runOnIdle { f.finishSearch() }
         tap("map")
         text("合成候補1").assertDoesNotExist()
         text("目的地").assertIsDisplayed()
         assertEquals(NavState.Idle, f.nav.state.value)
+    }
+
+    @Test
+    fun longPinchRoutesToThePointUnderThePointerUsingItsGeocodedName() {
+        val f = Fixture(MotionState.STOPPED)
+        render(f)
+        tap("map")
+        val large = compose.onNodeWithTag("bigmap")
+        large.performTouchInput { click(center + Offset(21f, -17f)) }
+        large.assertIsDisplayed()
+        assertEquals(null, f.requestedDestination)
+        large.performTouchInput { down(center + Offset(21f, -17f)) }
+        compose.mainClock.advanceTimeBy(850L)
+        text("経路を取得中…").assertIsDisplayed()
+        large.performTouchInput { up() }
+        assertEquals(f.selectedPoint, f.requestedDestination)
+        assertEquals(null, f.map.closesAt)
+        compose.runOnIdle { f.finishRoute() }
+        assertEquals("みほん市試験町1丁目", (f.nav.state.value as NavState.Guiding).destination.name)
     }
 
     @Test
@@ -296,12 +319,16 @@ class NavigationHudTest {
                         navState = displayState?.invoke() ?: state, destinationPrompt = f.input.prompt,
                     ),
                     false, HudDebugOptions(), {}, f.map.isOpen, quantumEnabled = false, onTap = f::tap,
+                    viewport = f.viewport, onMapHold = f::selectMapPoint,
                 )
             }
         }
     }
 
     private fun tap(tag: String) = compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
+    private fun tapOutside() = compose.onNodeWithTag("outside").performTouchInput {
+        click(Offset(5f, height - 5f))
+    }
     private fun text(value: String) = compose.onNodeWithText(value, useUnmergedTree = true)
 
     private fun speak(f: Fixture) {
@@ -337,6 +364,14 @@ class NavigationHudTest {
         private var closeTimer: Job? = null
         val fixes = MutableSharedFlow<LocationSample>(replay = 1).apply { tryEmit(syntheticFix(0)) }
         private val sampleRoute = syntheticNavRoute()
+        val selectedPoint = sampleRoute.polyline.last()
+        var requestedDestination: NavPoint? = null
+        val viewport = BigMapViewport().apply {
+            gestureMap = object : BigMapGestureMap {
+                override fun pointAt(pixel: Offset) = selectedPoint
+                override fun scrollBy(pixels: Offset) = error("A held pinch must not drag")
+            }
+        }
         private val candidates = (1..4).map {
             val offset = 449.0 + it
             NavCandidate("$it", "合成候補$it", "日本、〒000-0000 架空県みほん市試験町１丁目", sampleRoute.polyline.last(), offset)
@@ -347,8 +382,10 @@ class NavigationHudTest {
                 // Simulate a service that returns even after its caller has been cancelled.
                 return suspendCoroutine<Result<List<NavCandidate>>> { search = it }.getOrThrow()
             }
-            override suspend fun route(origin: NavPoint, destination: NavPoint): NavRoute =
-                suspendCoroutine { route = it }
+            override suspend fun route(origin: NavPoint, destination: NavPoint): NavRoute {
+                requestedDestination = destination
+                return suspendCoroutine { route = it }
+            }
         }
         val nav = NavRepository(scope, service, fixes, clock)
         val input: DestinationInput = DestinationInput(
@@ -369,11 +406,20 @@ class NavigationHudTest {
         fun tap(target: HudTarget) {
             val now = clock.elapsedRealtimeMillis()
             refreshMap()
+            updateMap(map.tap(target, now, motion, input.enteringDestination))
             if (target.isDestinationInput) {
                 fixes.tryEmit(syntheticFix(now))
                 input.tap(target)
-            } else updateMap(map.tap(target, now, motion, input.enteringDestination))
+            }
             scheduleClose()
+        }
+
+        fun selectMapPoint(point: NavPoint) {
+            updateMap(map.interact(clock.elapsedRealtimeMillis(), motion, input.enteringDestination))
+            input.selectMapPoint(point) { latitude, longitude ->
+                assertEquals(selectedPoint, NavPoint(latitude, longitude))
+                AddressParts("架空県", "みほん市", "試験町", "1丁目")
+            }
         }
 
         fun refreshMap() {

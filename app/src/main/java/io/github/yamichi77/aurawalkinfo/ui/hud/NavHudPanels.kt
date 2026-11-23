@@ -45,6 +45,9 @@ import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 
+internal fun HudVisualSpec.Clusters.rightClusterNavigation(bigMapOpen: Boolean) =
+    navigation.takeUnless { bigMapOpen }
+
 @Composable
 internal fun NavGuidancePanel(
     visual: NavHudVisual,

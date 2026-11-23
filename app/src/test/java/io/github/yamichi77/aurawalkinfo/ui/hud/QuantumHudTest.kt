@@ -1,5 +1,9 @@
 package io.github.yamichi77.aurawalkinfo.ui.hud
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
+
 import android.graphics.Paint
 import android.os.SystemClock
 import androidx.compose.runtime.mutableStateOf
@@ -135,7 +139,7 @@ class QuantumHudTest {
         tag("bigmap_mode").assertIsDisplayed()
         tag("map").assertDoesNotExist()
 
-        tag("bigmap").performClick()
+        tag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
         frames()
         effect("bigmap")
         effect("map")
@@ -232,7 +236,7 @@ class QuantumHudTest {
         tag("bigmap_mode").assertIsDisplayed().performClick()
         frames()
         noEffects()
-        tag("bigmap").performClick()
+        tag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
         frames()
         noEffects()
         tag("bigmap").assertExists() // The original fade keeps the non-clickable map mounted.

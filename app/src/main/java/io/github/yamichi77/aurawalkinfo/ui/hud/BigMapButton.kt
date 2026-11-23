@@ -189,6 +189,21 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
                 line(0f, 1f)
             }
             "2D" -> addRect(Rect(point(-0.9f, -0.9f), point(0.9f, 0.9f)))
+            "＋", "－" -> {
+                move(-1f, 0f)
+                line(1f, 0f)
+                if (label == "＋") {
+                    move(0f, -1f)
+                    line(0f, 1f)
+                }
+            }
+            "現在地" -> {
+                addOval(Rect(point(-0.65f, -0.65f), point(0.65f, 0.65f)))
+                move(-1.15f, 0f)
+                line(1.15f, 0f)
+                move(0f, -1.15f)
+                line(0f, 1.15f)
+            }
             else -> {
                 move(-0.8f, -0.8f)
                 line(0.8f, 0.8f)
@@ -203,3 +218,10 @@ private fun DrawScope.drawButtonIcon(label: String, radius: Float, alpha: Float)
         drawCircle(HudText, extent * 0.18f, point(0f, -0.35f), alpha)
     }
 }
+
+internal fun HudPlacement.BigMapButtonPlacement.buttonLabel(destination: String?, mode: BigMapMode): String? =
+    when (target) {
+        HudTarget.NAV_DESTINATION -> destination
+        HudTarget.BIGMAP_MODE -> mode.toggleLabel
+        else -> label
+    }

@@ -14,7 +14,16 @@ class HudPlacementTest {
     @Test
     fun bigMapButtonHitPanelsClearTheCircleAndFitInFrontOfTheOutsidePanel() {
         val map = HudPlacement.pose(0f, HudPlacement.bigMapPitch)
-        for (button in listOf(HudPlacement.bigMapDestinationButton, HudPlacement.bigMapModeButton)) {
+        val buttons = HudPlacement.bigMapButtons
+        assertEquals(
+            listOf(HudTarget.NAV_DESTINATION, HudTarget.BIGMAP_ZOOM_IN, HudTarget.BIGMAP_ZOOM_OUT,
+                HudTarget.BIGMAP_RECENTER, HudTarget.BIGMAP_MODE),
+            buttons.map { it.target },
+        )
+        buttons.zipWithNext().forEach { (above, below) ->
+            assertTrue(above.centerY - above.height / 2 > below.centerY + below.height / 2)
+        }
+        for (button in buttons) {
             val panel = button.pose()
             val halfWidth = button.width / 2
             val halfHeight = button.height / 2
