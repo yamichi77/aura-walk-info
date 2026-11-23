@@ -33,6 +33,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HEAD_TRACKING
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
+import io.github.yamichi77.aurawalkinfo.diagnostics.rememberSkyBandSettings
 import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
 import io.github.yamichi77.aurawalkinfo.nav.AndroidDestinationSpeech
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
@@ -50,7 +51,9 @@ import io.github.yamichi77.aurawalkinfo.ui.hud.DestinationInput
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudQuantumStartup
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudScene
 import io.github.yamichi77.aurawalkinfo.ui.hud.HudTarget
+import io.github.yamichi77.aurawalkinfo.ui.hud.HudVisualSpec
 import io.github.yamichi77.aurawalkinfo.ui.hud.LocalPicsReferenceNotice
+import io.github.yamichi77.aurawalkinfo.ui.hud.SkyBandTargets
 import io.github.yamichi77.aurawalkinfo.ui.hud.hudVisualSpecFor
 import io.github.yamichi77.aurawalkinfo.ui.hud.isDestinationInput
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
@@ -200,6 +203,7 @@ class MainActivity : ComponentActivity() {
                     val pics by container.picsReceiver.candidate.collectAsStateWithLifecycle()
                     val denied = !locationGranted && debug.fakeState == null
                     val navState by container.navRepository.state.collectAsStateWithLifecycle()
+                    val skyBandSettings = rememberSkyBandSettings(container.hudSettings)
                     val spec = hudVisualSpecFor(
                         debug.fakeState ?: state, noticePending = visibility.noticePending,
                         phase = controls.phase, countdown = controls.seconds,
@@ -212,7 +216,7 @@ class MainActivity : ComponentActivity() {
                     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled && !debug.preview2d
                     ObserveHeadPoses(
                         container.headPoses, container.headingTracking,
-                        enabled = spatial && headTrackingGranted && debug.fakeState == null,
+                        enabled = spatial && headTrackingGranted && (debug.fakeState == null || debug.selfCheck),
                     )
                     if (debug.fakeState != null || debug.grid || debug.capture) {
                         LaunchedEffect(spatial, headTrackingGranted) {
@@ -230,6 +234,11 @@ class MainActivity : ComponentActivity() {
                                 HudScene(
                                     spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
                                     controls.quantumStartup, container.wallClock, bigMapMode, onTap,
+                                    skyBandSettings, container.headingTracking,
+                                    SkyBandTargets.from(
+                                        navState,
+                                        pics.takeIf { (spec as? HudVisualSpec.Clusters)?.pics != null },
+                                    ),
                                 )
                             }
                         } else {

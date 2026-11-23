@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
@@ -82,19 +83,7 @@ internal fun PicsMapOverlay(
                 if (fresh) Color(0x99E0F7FF) else PicsStaleColor,
                 diameter / 2f, origin, style = Stroke(1f),
             )
-            display.dots.forEachIndexed { index, aspect ->
-                val color = when {
-                    !fresh -> PicsStaleColor
-                    aspect == PicsAspect.RED -> Color(0xFFE07A7A)
-                    aspect == PicsAspect.GREEN || aspect == PicsAspect.FLASHING_GREEN -> Color(0xFF7FBFA8)
-                    else -> PicsStaleColor
-                }
-                val dx = (index - (display.dots.size - 1) / 2f) * diameter * 0.28f
-                drawCircle(
-                    color, diameter * 0.09f, origin + Offset(dx, diameter * 0.72f),
-                    style = if (fresh && aspect == PicsAspect.FLASHING_GREEN) Stroke(1f) else Fill,
-                )
-            }
+            drawPicsDots(display, origin, diameter)
         }
         if (bigMapMode != null) {
             val labelHeight = 22.dp
@@ -108,5 +97,22 @@ internal fun PicsMapOverlay(
                 HudLabel(display.label, labelSize, display.labelColor)
             }
         }
+    }
+}
+
+internal fun DrawScope.drawPicsDots(display: PicsHudDisplay, origin: Offset, diameter: Float) {
+    val fresh = display.freshness == PicsFreshness.FRESH
+    display.dots.forEachIndexed { index, aspect ->
+        val color = when {
+            !fresh -> PicsStaleColor
+            aspect == PicsAspect.RED -> Color(0xFFE07A7A)
+            aspect == PicsAspect.GREEN || aspect == PicsAspect.FLASHING_GREEN -> Color(0xFF7FBFA8)
+            else -> PicsStaleColor
+        }
+        val dx = (index - (display.dots.size - 1) / 2f) * diameter * 0.28f
+        drawCircle(
+            color, diameter * 0.09f, origin + Offset(dx, diameter * 0.72f),
+            style = if (fresh && aspect == PicsAspect.FLASHING_GREEN) Stroke(1f) else Fill,
+        )
     }
 }

@@ -71,14 +71,14 @@ internal fun navHudVisualFor(state: NavState, noFix: Boolean): NavHudVisual? {
 
 internal fun navDistance(meters: Double) = formatDistance(meters).let { it.number + it.unit }
 
+internal fun roundedNavTurnDistance(meters: Double): String = when {
+    meters < 100 -> "${(meters / 5).roundToInt() * 5}m"
+    meters < 1_000 -> "${(meters / 10).roundToInt() * 10}m"
+    else -> "%.1fkm".format(Locale.ROOT, meters / 1_000)
+}
+
 internal fun formatNavTurn(turn: NavTurn): String {
-    val meters = turn.distanceMeters
-    val distance = when {
-        meters <= 10 -> "まもなく"
-        meters < 100 -> "${(meters / 5).roundToInt() * 5}m先"
-        meters < 1_000 -> "${(meters / 10).roundToInt() * 10}m先"
-        else -> "%.1fkm先".format(Locale.ROOT, meters / 1_000)
-    }
+    val distance = if (turn.distanceMeters <= 10) "まもなく" else "${roundedNavTurnDistance(turn.distanceMeters)}先"
     val direction = navManeuver(turn) ?: turn.step.instructions
         .replace(Regex("\\s+"), " ").trim().let { text ->
             val limit = 12
