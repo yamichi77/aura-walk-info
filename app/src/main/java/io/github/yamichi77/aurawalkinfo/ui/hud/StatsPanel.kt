@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -33,9 +34,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
+import io.github.yamichi77.aurawalkinfo.ui.WallClock
+import io.github.yamichi77.aurawalkinfo.ui.format.formatCurrentTime
+import io.github.yamichi77.aurawalkinfo.ui.format.millisUntilNextMinute
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudAddress
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 
 internal const val HudAnimationMillis = 300
@@ -48,6 +53,7 @@ internal fun StatsPanel(
     modifier: Modifier = Modifier,
     onNoticeTimeout: () -> Unit = {},
     quantum: QuantumAnimation? = null,
+    wallClock: WallClock? = null,
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.TopStart) {
         val widthPx = with(LocalDensity.current) { maxWidth.toPx() }
@@ -81,6 +87,7 @@ internal fun StatsPanel(
                     // Japanese fallback fonts reserve extra interline space even for single-line text.
                     verticalArrangement = Arrangement.spacedBy((-4 * textScale).dp),
                 ) {
+                    if (wallClock != null) CurrentTimeLabel(wallClock, 16 * textScale, startup)
                     if (spec.leftPhase == WalkPhase.Standby) {
                         HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx,
                             quantum = startup, particles = 20)
@@ -125,6 +132,19 @@ internal fun StatsPanel(
 }
 
 @Composable
+private fun CurrentTimeLabel(clock: WallClock, size: Float, startup: QuantumAnimation?) {
+    val minute by produceState(remember(clock) { clock.now().truncatedTo(ChronoUnit.MINUTES).toLocalTime() }, clock) {
+        while (true) {
+            val now = clock.now()
+            value = now.truncatedTo(ChronoUnit.MINUTES).toLocalTime()
+            delay(millisUntilNextMinute(now))
+        }
+    }
+    val text = remember(minute) { formatCurrentTime(minute) }
+    HudLabel(text, size, HudAddress, quantum = startup, particles = 12)
+}
+
+@Composable
 internal fun HudLabel(
     text: String,
     size: Float,
@@ -151,7 +171,8 @@ internal fun HudLabel(
     }
     val baseline = if (quantum != null) remember { mutableFloatStateOf(0f) } else null
     val reveal = if (quantum != null && baseline != null) {
-        quantumLabelModifier(quantum, text, size, weight, scaleX, particles) { baseline.floatValue }
+        Modifier.testTag("quantum-label")
+            .then(quantumLabelModifier(quantum, text, size, weight, scaleX, particles) { baseline.floatValue })
     } else Modifier
     Text(
         text = text,

@@ -35,17 +35,18 @@ class HudPlacementTest {
 
     @Test
     fun rectangleFitsApprovedBoundsAndCircularEdgeKeepsClearGap() {
-        val left = HudPlacement.pose(Layout.leftYaw, Layout.pitch)
+        val left = HudPlacement.statsPose()
         for (x in listOf(-1f, 1f)) {
             for (y in listOf(-1f, 1f)) {
                 val point = left.transformPoint(
                     Vector3(x * HudPlacement.statsWidthMeters / 2, y * HudPlacement.statsHeightMeters / 2, 0f),
                 )
-                assertTrue("yaw=${yaw(point)}", yaw(point) in -29.0..-16.0)
+                assertTrue("yaw=${yaw(point)}", yaw(point) >= -29.0 && yaw(point) < -16.0)
                 val pitch = Math.toDegrees(atan2(point.y, hypot(point.x, point.z)).toDouble())
-                assertTrue("pitch=$pitch", pitch in -16.0..-2.0)
+                assertTrue("pitch=$pitch", pitch >= -16.0 && pitch < 0.0)
             }
         }
+        assertTrue(left.transformPoint(Vector3(0f, HudPlacement.statsHeightMeters / 2, 0f)).y < 0f)
         val right = HudPlacement.pose(Layout.rightYaw, Layout.pitch)
         val radius = HudPlacement.mapSizeMeters(Layout.stoppedDiameter) / 2
         for (angle in 0 until 360) {

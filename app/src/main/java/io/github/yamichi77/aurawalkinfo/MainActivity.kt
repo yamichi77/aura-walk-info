@@ -147,13 +147,13 @@ class MainActivity : ComponentActivity() {
                         if (headTrackingGranted) {
                             HudScene(
                                 spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                                controls.quantumStartup, onTap,
+                                controls.quantumStartup, container.wallClock, onTap,
                             )
                         }
                     } else {
                         PhoneScreen(
                             spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
-                            quantumStartup = controls.quantumStartup, onTap = onTap,
+                            quantumStartup = controls.quantumStartup, wallClock = container.wallClock, onTap = onTap,
                         )
                     }
                 }

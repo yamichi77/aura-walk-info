@@ -5,6 +5,8 @@ import android.os.SystemClock
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -14,8 +16,10 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
+import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -34,6 +38,8 @@ class QuantumHudTest {
     private val phase = mutableStateOf<WalkPhase>(WalkPhase.Standby)
     private val notice = mutableStateOf(false)
     private val map = mutableStateOf(BigMapControl())
+    private var now = ZonedDateTime.parse("2026-11-23T09:05:00+09:00")
+    private val wallClock = WallClock { now }
 
     @Test
     fun startupSkipsTheNoticeAndPlaysOnceThenDisplaysTheSameStandbyHud() {
@@ -46,9 +52,11 @@ class QuantumHudTest {
         noEffects()
         change { notice.value = false }
         effect("left")
+        animatedTime("9:05").assertExists()
         tag("quantum-map").assertDoesNotExist()
         settle()
         noEffects()
+        updatedTimeWithoutEffect("9:05")
         text("タップで開始", "みほん市試験町1丁目")
         tag("map").assertIsDisplayed()
         change { state.value = state.value.copy(motionState = MotionState.FAST) }
@@ -69,6 +77,7 @@ class QuantumHudTest {
         compose.mainClock.advanceTimeBy(380)
         tag("countdown-ripple").assertDoesNotExist()
         effect("left")
+        updatedTimeWithoutEffect("9:05")
         settle()
         noEffects()
         text("1.24", "km", "歩行 18:42")
@@ -92,9 +101,22 @@ class QuantumHudTest {
         change { phase.value = WalkPhase.Summary }
         compose.mainClock.advanceTimeBy(380)
         effect("left")
+        updatedTimeWithoutEffect("9:05")
         settle()
         noEffects()
         text("おつかれさま", "1.30", "km", "歩行 18:43", "タップで新しく開始")
+    }
+
+    @Test
+    fun minuteChangeDoesNotTriggerAQuantumEffect() {
+        now = now.withSecond(58)
+        show()
+        settle()
+        updatedTimeWithoutEffect("9:05")
+        compose.runOnIdle { now = now.plusMinutes(1).withSecond(0) }
+        compose.mainClock.advanceTimeBy(1_200)
+        updatedTimeWithoutEffect("9:06")
+        noEffects()
     }
 
     @Test
@@ -187,7 +209,10 @@ class QuantumHudTest {
         compose.setContent {
             AdditiveDisplayTheme {
                 val spec = hudVisualSpecFor(state.value, noticePending = notice.value, phase = phase.value)
-                PhoneScreen(spec, false, HudDebugOptions(), {}, map.value.isOpen, quantumEnabled = enabled) {
+                PhoneScreen(
+                    spec, false, HudDebugOptions(), {}, map.value.isOpen,
+                    quantumEnabled = enabled, wallClock = wallClock,
+                ) {
                     map.value = map.value.tap(it, 0, state.value.motionState)
                 }
             }
@@ -207,6 +232,12 @@ class QuantumHudTest {
     }
     private fun settle() = compose.mainClock.advanceTimeBy(900)
     private fun tag(name: String) = compose.onNodeWithTag(name, useUnmergedTree = true)
+    private fun animatedTime(time: String) =
+        compose.onNode(hasText(time) and hasTestTag("quantum-label"), useUnmergedTree = true)
+    private fun updatedTimeWithoutEffect(time: String) {
+        text(time)
+        animatedTime(time).assertDoesNotExist()
+    }
     private fun effect(panel: String) = tag("quantum-$panel").assertExists()
     private fun noEffects() = listOf("left", "map", "bigmap").forEach {
         tag("quantum-$it").assertDoesNotExist()

@@ -56,6 +56,7 @@ import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
 import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
+import io.github.yamichi77.aurawalkinfo.ui.WallClock
 import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
 import java.util.Locale
@@ -71,13 +72,14 @@ internal fun HudScene(
     onNoticeTimeout: () -> Unit,
     bigMapOpen: Boolean,
     quantumStartup: HudQuantumStartup,
+    wallClock: WallClock,
     onTap: (HudTarget) -> Unit,
 ) {
     val session = LocalSession.current
     if (session == null) {
         PhoneScreen(
             spec, locationDenied, debug, onNoticeTimeout, bigMapOpen,
-            quantumStartup = quantumStartup, onTap = onTap,
+            quantumStartup = quantumStartup, wallClock = wallClock, onTap = onTap,
         )
         return
     }
@@ -174,7 +176,7 @@ internal fun HudScene(
                     SpatialHudPanels(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
                         showRotationFallback, onNoticeTimeout, bigMapOpen, onTap,
-                        !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum,
+                        !HideHudOnHeadMotion || !hiddenForMotion, countdown, quantum, wallClock,
                     )
                 }
             }
@@ -200,6 +202,7 @@ private fun SpatialHudPanels(
     inputEnabled: Boolean,
     countdown: CountdownPresentation?,
     quantum: HudQuantum,
+    wallClock: WallClock,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
@@ -233,6 +236,7 @@ private fun SpatialHudPanels(
                     .capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
                 onNoticeTimeout,
                 quantum.left,
+                wallClock,
             )
         }
 
@@ -317,7 +321,9 @@ private fun PlacedPanel(
     motionOpacity: Float = 1f,
     content: @Composable () -> Unit,
 ) {
-    val pose = remember(name) { HudPlacement.pose(name.yaw, name.pitch) }
+    val pose = remember(name) {
+        if (name == HudPanel.LEFT) HudPlacement.statsPose() else HudPlacement.pose(name.yaw, name.pitch)
+    }
     val placement = HudPlacement.modifier(pose, dpPerMeter, scale).alpha(motionOpacity)
     val size = SubspaceModifier.width((width * dpPerMeter / scale).dp)
         .height((height * dpPerMeter / scale).dp)
