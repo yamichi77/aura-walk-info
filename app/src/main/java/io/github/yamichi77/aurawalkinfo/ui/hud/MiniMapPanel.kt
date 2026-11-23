@@ -47,6 +47,7 @@ import io.github.yamichi77.aurawalkinfo.R
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.saveProbePng
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
+import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -59,10 +60,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import com.google.android.gms.maps.GoogleMap as SdkMap
 
-private const val TAG = "AuraMap"
+internal const val MAP_LOG_TAG = "AuraMap"
 private const val SNAPSHOT_FILE = "minimap-snapshot.png"
 private const val MAP_ZOOM = 17.5f
 private const val CAMERA_ANIMATION_MS = 500
+
+internal fun northUpCameraPosition(center: MapCenter, zoom: Float) =
+    CameraPosition(LatLng(center.latitude, center.longitude), zoom, 0f, 0f)
 
 private val mapOutline = object : ViewOutlineProvider() {
     override fun getOutline(view: View, outline: Outline) {
@@ -102,22 +106,22 @@ internal fun MiniMapPanel(
     val mapOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
     if (selfCheck) {
         LaunchedEffect(hasKey) {
-            if (!hasKey) Log.i(TAG, "SKIP key=missing")
+            if (!hasKey) Log.i(MAP_LOG_TAG, "SKIP key=missing")
         }
         LaunchedEffect(spec.mapDiameter, spec.mapOpacity) {
             snapshotFlow { mapOpacity }.first { it == spec.mapOpacity }
-            Log.i(TAG, "presentation diameter=${spec.mapDiameter} mapOpacity=${spec.mapOpacity}")
-        }
-        if (center != null) {
-            LaunchedEffect(spec.mapBearingDeg) {
-                Log.i(TAG, "camera targetBearing=${spec.mapBearingDeg}")
-            }
+            Log.i(MAP_LOG_TAG, "presentation diameter=${spec.mapDiameter} mapOpacity=${spec.mapOpacity}")
         }
     }
 
     BoxWithConstraints(modifier) {
         if (center != null && hasKey) {
-            val position = CameraPosition(LatLng(center.latitude, center.longitude), zoom, 0f, spec.mapBearingDeg)
+            val position = northUpCameraPosition(center, zoom)
+            if (selfCheck) {
+                LaunchedEffect(position) {
+                    Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}")
+                }
+            }
             // Equal padding keeps SDK attribution inside the circle and the camera target centered.
             val padding = PaddingValues(minOf(maxWidth, maxHeight) * 0.15f)
             MiniMapSurface(
@@ -126,7 +130,7 @@ internal fun MiniMapPanel(
                 mapStyle = mapStyle,
             )
         }
-        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight)
+        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck)
     }
 }
 
@@ -209,7 +213,7 @@ private fun MiniMapSurface(
                         currentCoroutineContext().ensureActive()
                     }
                 }
-                if (selfCheck) Log.i(TAG, "camera bearing=${map.cameraPosition.bearing}")
+                if (selfCheck) Log.i(MAP_LOG_TAG, "camera bearing=${map.cameraPosition.bearing}")
             }
         }
     }
@@ -221,14 +225,14 @@ private fun MiniMapSurface(
                     sdkMap.await()
                 }
                 if (map == null) {
-                    Log.i(TAG, "FAIL onMapLoaded=${loaded.isCompleted} timeout")
+                    Log.i(MAP_LOG_TAG, "FAIL onMapLoaded=${loaded.isCompleted} timeout")
                 } else {
                     checkMapSnapshot(context, map, mapSize)
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                Log.i(TAG, "FAIL onMapLoaded=${loaded.isCompleted} ${error.javaClass.simpleName}")
+                Log.i(MAP_LOG_TAG, "FAIL onMapLoaded=${loaded.isCompleted} ${error.javaClass.simpleName}")
             }
         }
     }
@@ -244,7 +248,7 @@ private suspend fun checkMapSnapshot(context: Context, map: SdkMap, size: IntSiz
     // T2 observed an SDK crash when snapshot was requested on the sleeping 0x0 surface.
     val interactive = context.getSystemService(PowerManager::class.java).isInteractive
     if (!interactive || size.width <= 0 || size.height <= 0) {
-        Log.i(TAG, "FAIL onMapLoaded=true snapshot skipped interactive=$interactive layout=${size.width}x${size.height}")
+        Log.i(MAP_LOG_TAG, "FAIL onMapLoaded=true snapshot skipped interactive=$interactive layout=${size.width}x${size.height}")
         return
     }
     val result = CompletableDeferred<Bitmap?>()
@@ -252,13 +256,13 @@ private suspend fun checkMapSnapshot(context: Context, map: SdkMap, size: IntSiz
     map.snapshot { result.complete(it) }
     val bitmap = withTimeoutOrNull(5_000L) { result.await() }
     if (bitmap == null) {
-        Log.i(TAG, "FAIL onMapLoaded=true snapshot unavailable bearing=$bearing")
+        Log.i(MAP_LOG_TAG, "FAIL onMapLoaded=true snapshot unavailable bearing=$bearing")
         return
     }
     val (nonBlack, bright) = withContext(Dispatchers.Default) { pixelPercentages(bitmap) }
     saveProbePng(context, SNAPSHOT_FILE, bitmap)
     val verdict = if (nonBlack >= 1.0 && bright <= 25.0) "PASS" else "FAIL"
-    Log.i(TAG, String.format(
+    Log.i(MAP_LOG_TAG, String.format(
         Locale.ROOT, "%s onMapLoaded=true nonBlack=%.2f%% bright=%.2f%% bearing=%.2f snapshot=%s",
         verdict, nonBlack, bright, bearing, SNAPSHOT_FILE,
     ))

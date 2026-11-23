@@ -8,6 +8,7 @@ import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.ui.format.FormattedDistance
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 internal val exampleAddress = AddressState.Available(AddressParts("架空県", "みほん市", "試験町", "1丁目"))
@@ -60,12 +61,12 @@ class HudVisualSpecTest {
     }
 
     @Test
-    fun mapUsesLatestCenterAndRetainsBearingAcrossLossOfFix() {
+    fun mapUsesLatestCenterAndKeepsTheReportedArrowBearingNullable() {
         val center = MapCenter(0.1, 0.2)
         val state = hudTestState(MotionState.NO_FIX)
         val withoutFix = hudVisualSpecFor(state) as HudVisualSpec.Clusters
         assertEquals(null, withoutFix.mapCenter)
-        assertEquals(0f, withoutFix.mapBearingDeg)
+        assertNull(withoutFix.mapBearingDeg)
 
         val withLastFix = hudVisualSpecFor(state.copy(mapCenter = center, mapBearingDeg = 90f)) as HudVisualSpec.Clusters
         assertEquals(center, withLastFix.mapCenter)

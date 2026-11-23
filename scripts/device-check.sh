@@ -460,16 +460,29 @@ check_map_state() {
 }
 
 map_replay_turn() {
-    awk -v key="$1" '
+    awk '
         /AuraSession[[:space:]]*: REPLAY walk_stop[[:space:]]*$/ { replay = 1 }
         replay && /AuraSession[[:space:]]*: SAMPLE 120 / { turned = 1 }
-        replay && $0 ~ ("AuraMap[[:space:]]*: camera " key "=[0-9.]+[[:space:]]*$") {
+        replay && /AuraMap[[:space:]]*: marker arrowAngle=[0-9.]+[[:space:]]*$/ {
             split($NF, values, "=")
             angle = values[2] + 0
             if (angle <= 2 || angle >= 358) north = 1
-            if (north && angle >= 88 && angle <= 92) east = 1
+            if (turned && north && angle >= 88 && angle <= 92) east = 1
         }
         END { exit !(turned && east) }
+    '
+}
+
+map_replay_north_up() {
+    awk -v key="$1" '
+        /AuraSession[[:space:]]*: REPLAY walk_stop[[:space:]]*$/ { replay = 1 }
+        replay && /AuraSession[[:space:]]*: SAMPLE 120 / { turned = 1 }
+        replay && $0 ~ ("AuraMap[[:space:]]*: camera " key "=[-0-9.]+[[:space:]]*$") {
+            split($NF, values, "=")
+            if (turned) seen = 1
+            if (values[2] + 0 != 0) rotated = 1
+        }
+        END { exit (rotated ? 2 : !seen) }
     '
 }
 
@@ -498,7 +511,7 @@ check_map_replay() {
             replay_scenario stop || record FAIL 'walk_stop 地図の再生停止'
             return 0
         fi
-        if map_replay_turn bearing <<< "$logs"; then break; fi
+        if map_replay_turn <<< "$logs" && map_replay_north_up bearing <<< "$logs"; then break; fi
         if $sleeping_preview; then
             if ! $refreshed_east && grep -Eq 'AuraSession[[:space:]]*: SAMPLE 120 ' <<< "$logs"; then
                 refresh_preview --ez selfcheck true --es fakeState replay || break
@@ -511,14 +524,21 @@ check_map_replay() {
         sleep 2
     done
     printf '%s\n' "$logs" >> "$log"
-    if map_replay_turn targetBearing <<< "$logs"; then
-        record PASS 'walk_stop カメラへの方位入力（約90°）'
+    if map_replay_turn <<< "$logs"; then
+        record PASS 'walk_stop 現在地の矢印の回転（約90°）'
+    else
+        record FAIL 'walk_stop 現在地の矢印の回転'
+    fi
+    if map_replay_north_up targetBearing <<< "$logs"; then
+        record PASS 'walk_stop カメラへの方位入力（0°）'
     else
         record FAIL 'walk_stop カメラへの方位入力'
     fi
-    if map_replay_turn bearing <<< "$logs"; then
-        record PASS 'walk_stop カメラの方位（約90°）'
-    elif $preview && ! grep -Eq '^[[:space:]]*mInteractive=true[[:space:]]*$' <<< "$power"; then
+    local camera_status=0
+    map_replay_north_up bearing <<< "$logs" || camera_status=$?
+    if (( camera_status == 0 )); then
+        record PASS 'walk_stop カメラの方位（0°）'
+    elif (( camera_status == 1 )) && $sleeping_preview; then
         record SKIP 'walk_stop カメラの方位（表示スリープ中）'
     else
         record FAIL 'walk_stop カメラの方位'
