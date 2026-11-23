@@ -6,7 +6,7 @@ export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
 default_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
-all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband
+all_checks=$default_checks,ble,pics,map3d,heading,speech,nav,skyband,spatial
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -579,7 +579,7 @@ wait_for_safety_log() {
     [[ $pid =~ ^[0-9]+$ ]] || return 1
     run_log=
     while (( SECONDS < deadline )); do
-        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav AuraSky AuraPlacement) || return 1
+        run_log=$(adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraProbe AuraSession AuraHud AuraPics AuraNav AuraSky AuraPlacement AuraSpatial) || return 1
         entries=$run_log
         if [[ -n $after ]]; then
             entries=$(awk -v after="$after" 'seen; $0 ~ after { seen = 1 }' <<< "$run_log")
@@ -619,6 +619,84 @@ sky_align_north() {
     sky_offset=$(awk -F'rawHead=' '/AuraSky.*UNCERTAIN/ && $2 ~ /^[0-9]/ { angle = -($2 + 0); found = 1 }
         END { if (!found) exit 1; printf "%.2f", angle }' <<< "$run_log") || return 1
     sky_settings --ef north_offset "$sky_offset" --ef north_uncertainty 5
+}
+
+spatial_align_north() {
+    local bearing=$1 offset
+    sky_settings --ef north_offset 0 --ef north_uncertainty 16 &&
+        wait_for_safety_log 'AuraSpatial[[:space:]]*: NORTH_OVERRIDE rawHead=[0-9.]+ uncertainty=16\.00' 5 || return 1
+    offset=$(awk -v bearing="$bearing" -F'rawHead=' '/AuraSpatial.*NORTH_OVERRIDE.*uncertainty=16\.00/ && $2 ~ /^[0-9]/ {
+        angle = bearing - ($2 + 0); found = 1
+    } END { if (!found) exit 1; printf "%.2f", angle }' <<< "$run_log") || return 1
+    sky_settings --ef north_offset "$offset" --ef north_uncertainty 5
+}
+
+check_spatial() {
+    local original_marks deadline
+    if ! adb_retry shell pm grant "$pkg" androidx.xr.runtime.manifest.SCENE_UNDERSTANDING_COARSE >> "$log" 2>&1; then
+        record FAIL 'spatial 空間アンカーの権限'
+        return 0
+    fi
+
+    start_run spatial-nav -W --es startMode auto --es fakeState replay --ez selfcheck true || return 0
+    if ! wait_for_safety_log 'AuraSpatial[[:space:]]*: SETTINGS ready enabled=(true|false)' 5; then
+        record FAIL 'spatial 設定受信の開始'
+        return 0
+    fi
+    original_marks=$(sed -n 's/.*AuraSpatial[[:space:]]*: SETTINGS ready enabled=\(true\|false\).*/\1/p' <<< "$run_log" | tail -n 1)
+    run_log=
+    echo 'spatial: 今から12秒、頭を正面に向けたまま矢印と光の柱を確認してください。'
+    deadline=$((SECONDS + 12))
+    # The turn and destination straddle this heading on the existing synthetic route.
+    if sky_settings --ez spatial_marks true &&
+        spatial_align_north 27 &&
+        adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es scenario synthetic >> "$log" &&
+        replay_scenario navigation --ef speed 0.4 &&
+        wait_for_safety_log 'AuraSpatial[[:space:]]*: SHOW mark=DESTINATION reason=SHOW ' 6 &&
+        grep -Eq 'AuraSpatial[[:space:]]*: SHOW mark=TURN reason=SHOW ' <<< "$run_log"; then
+        record PASS 'spatial 矢印と光の柱'
+    else
+        record FAIL 'spatial 矢印と光の柱'
+    fi
+    if (( SECONDS < deadline )); then sleep "$((deadline - SECONDS))"; fi
+    echo 'spatial: 終わり（ナビ）'
+    if sky_settings --ez spatial_marks false &&
+        wait_for_safety_log 'AuraSpatial[[:space:]]*: HIDE mark=DESTINATION reason=DISABLED ' 4 'AuraSpatial.*SHOW mark=DESTINATION'; then
+        record PASS 'spatial 設定オフで消去'
+    else
+        record FAIL 'spatial 設定オフで消去'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    adb_retry shell am broadcast -a "$pkg.NAV" -p "$pkg" --es action cancel >> "$log" || true
+    replay_scenario stop || true
+
+    run_log=
+    if start_run spatial-pics -W --es fakeState stopped --ez selfcheck true &&
+        wait_for_safety_log 'AuraSpatial[[:space:]]*: SETTINGS ready' 5 &&
+        wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5; then
+        echo 'spatial: 今から10秒、頭を正面に向けたまま信号機の印を確認してください。'
+        deadline=$((SECONDS + 10))
+        if sky_settings --ez spatial_marks true && spatial_align_north 0 &&
+            pics_scenario spatial &&
+            wait_for_safety_log 'AuraSpatial[[:space:]]*: SHOW mark=SIGNAL reason=SHOW ' 5; then
+            record PASS 'spatial 信号機の印'
+        else
+            record FAIL 'spatial 信号機の印'
+        fi
+        if (( SECONDS < deadline )); then sleep "$((deadline - SECONDS))"; fi
+        echo 'spatial: 終わり（信号機）'
+        if wait_for_safety_log 'AuraSpatial[[:space:]]*: HIDE mark=SIGNAL reason=NO_SIGNAL ' 5 'AuraSpatial.*SHOW mark=SIGNAL'; then
+            record PASS 'spatial 信号の受信途絶で消去'
+        else
+            record FAIL 'spatial 信号の受信途絶で消去'
+        fi
+    else
+        record FAIL 'spatial 信号機の再生準備'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    pics_scenario stop || record FAIL 'spatial PICS 再生停止'
+    sky_settings --ez spatial_marks "$original_marks" --ez clear_north true ||
+        record FAIL 'spatial 元の設定に復元'
 }
 
 check_skyband() {
@@ -876,7 +954,8 @@ main() {
         if selected input; then record SKIP 'input（装着が必要）'; fi
         if selected bigmap; then record SKIP 'bigmap（装着が必要）'; fi
         if selected skyband; then record SKIP 'skyband（装着が必要）'; fi
-        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband)(,(placement|headmotion|input|bigmap|skyband))*$ ]]; then
+        if selected spatial; then record SKIP 'spatial（装着が必要）'; fi
+        if [[ $only =~ ^(placement|headmotion|input|bigmap|skyband|spatial)(,(placement|headmotion|input|bigmap|skyband|spatial))*$ ]]; then
             printf '%s\n' "${results[@]}"
             return 0
         fi
@@ -907,6 +986,7 @@ main() {
     if selected speech; then check_t15_probe speech; fi
     if selected nav; then check_nav; fi
     if ! $preview && selected skyband; then check_skyband; fi
+    if ! $preview && selected spatial; then check_spatial; fi
     summary
     return "$failed"
 }

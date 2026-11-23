@@ -226,6 +226,8 @@ class WalkSessionRepository internal constructor(
                     mapCenter = fix?.let { MapCenter(it.latitude, it.longitude) },
                     mapBearingDeg = bearing,
                     lastFixAccuracyMeters = fix?.accuracyMeters,
+                    // Replay timestamps use the simulated clock, outside the ARCore pose clock.
+                    lastFixTimeMillis = fix?.elapsedRealtimeMillis?.takeUnless { input.replay },
                     gpsCourseDeg = fix?.takeIf {
                         MotionThresholds.hasFix(it, now) &&
                             it.speedMps?.let { speed -> speed.isFinite() && speed >= MotionThresholds.WALKING_MPS } == true

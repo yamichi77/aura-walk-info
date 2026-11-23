@@ -22,10 +22,16 @@ internal class SkyBandSettings(private val settings: HudSettings) {
         private set
     var northOverride by mutableStateOf<NorthEstimate?>(null)
         private set
+    var spatialMarksEnabled by mutableStateOf(settings.spatialMarks)
+        private set
     var simulateTrackingLoss by mutableStateOf(false)
         private set
 
     fun applyDebugIntent(intent: Intent) {
+        if (intent.hasExtra("spatial_marks")) {
+            spatialMarksEnabled = intent.getBooleanExtra("spatial_marks", spatialMarksEnabled)
+            settings.spatialMarks = spatialMarksEnabled
+        }
         if (intent.hasExtra("sky_band")) {
             enabled = intent.getBooleanExtra("sky_band", enabled)
             settings.skyBand = enabled
@@ -59,6 +65,7 @@ internal fun rememberSkyBandSettings(settings: HudSettings): SkyBandSettings {
             Manifest.permission.DUMP, null, Context.RECEIVER_EXPORTED,
         )
         Log.i("AuraSky", "SETTINGS ready enabled=${state.enabled}")
+        Log.i("AuraSpatial", "SETTINGS ready enabled=${state.spatialMarksEnabled}")
         onDispose { context.unregisterReceiver(receiver) }
     }
     return state
