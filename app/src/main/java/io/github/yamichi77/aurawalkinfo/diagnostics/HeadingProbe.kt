@@ -48,6 +48,10 @@ internal suspend fun runHeadingProbe(
                     maximum = maxOf(maximum, unwrapped)
                     previousYaw = yaw
                     yawCount++
+                    // A once-per-second trace separates head turns from tracking jumps (T20 on AURA).
+                    if (yawCount % 10 == 1) {
+                        logProbe(String.format(Locale.ROOT, "heading yawTrace n=%d yaw=%.2f unwrapped=%.2f", yawCount, yaw, unwrapped))
+                    }
                 }
             }
             awaitCancellation()
