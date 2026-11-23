@@ -2,6 +2,7 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import androidx.compose.ui.graphics.Color
 import io.github.yamichi77.aurawalkinfo.location.AddressState
+import io.github.yamichi77.aurawalkinfo.pics.PicsCandidate
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import io.github.yamichi77.aurawalkinfo.session.WalkPhase
@@ -46,6 +47,7 @@ internal sealed interface HudVisualSpec {
         val phase: WalkPhase = WalkPhase.Measuring,
         val countdown: Int? = null,
         val startingFromSummary: Boolean = false,
+        val pics: PicsHudDisplay? = null,
     ) : HudVisualSpec {
         val leftPhase: WalkPhase get() = leftPhaseFor(phase, startingFromSummary)
     }
@@ -64,6 +66,7 @@ internal fun hudVisualSpecFor(
     phase: WalkPhase = WalkPhase.Measuring,
     countdown: Int? = null,
     startingFromSummary: Boolean = false,
+    pics: PicsCandidate? = null,
 ): HudVisualSpec {
     if (state.motionState == MotionState.FAST) return HudVisualSpec.Fast
     if (userHidden) return HudVisualSpec.Hidden
@@ -98,5 +101,6 @@ internal fun hudVisualSpecFor(
         phase = phase,
         countdown = countdown,
         startingFromSummary = startingFromSummary,
+        pics = pics?.takeIf { stopped && !noticePending }?.toHudDisplay(),
     )
 }

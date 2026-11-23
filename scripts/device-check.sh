@@ -636,7 +636,7 @@ check_pics() {
     local args=(-W --es fakeState stopped)
     if $preview; then args+=(--ez preview2d true); fi
     run_log=
-    start_run t17a-pics "${args[@]}" || return 0
+    start_run t17b-pics "${args[@]}" || return 0
     if wait_for_safety_log 'AuraPics[[:space:]]*: PICS_REPLAY ready' 5 &&
         pics_scenario red_to_green &&
         wait_for_safety_log 'AuraPics[[:space:]]*: PICS scenario=red_to_green phase=HIDDEN' 9 &&
@@ -652,6 +652,15 @@ check_pics() {
         record PASS 'pics 赤から青への遷移と受信途絶後の失効'
     else
         record FAIL 'pics 赤から青への遷移と受信途絶後の失効'
+    fi
+    if grep -Eq 'AuraPics[[:space:]]*: PICS display phase=FRESH text=信号は参考表示です$' <<< "$run_log" &&
+        grep -Eq 'AuraPics[[:space:]]*: PICS display phase=STALE text=信号は参考表示です$' <<< "$run_log" &&
+        pics_scenario stale &&
+        wait_for_safety_log 'AuraPics[[:space:]]*: PICS display phase=STALE text=信号 赤3$' 7 &&
+        grep -Eq 'AuraPics[[:space:]]*: PICS display phase=FRESH text=信号 赤3$' <<< "$run_log"; then
+        record PASS 'pics 初回の参考表示と信号行の鮮度'
+    else
+        record FAIL 'pics 初回の参考表示と信号行の鮮度'
     fi
     printf '%s\n' "$run_log" >> "$log"
     pics_scenario stop || record FAIL 'pics 再生停止'

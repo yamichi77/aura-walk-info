@@ -79,6 +79,7 @@ internal fun StatsPanel(
             }
             locationDenied -> HudLabel("位置の権限がありません", 14 * textScale, HudText, widthPx = widthPx)
             spec is HudVisualSpec.Clusters -> {
+                val pics = rememberFadingPics(spec.pics)
                 val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
                 val startup = quantum?.takeIf { it.effect == QuantumEffect.Startup }
                 val effectTag = if (quantum?.drawing == true) Modifier.testTag("quantum-left") else Modifier
@@ -91,6 +92,7 @@ internal fun StatsPanel(
                     if (spec.leftPhase == WalkPhase.Standby) {
                         HudLabel("タップで開始", 16 * textScale, HudText, widthPx = widthPx,
                             quantum = startup, particles = 20)
+                        if (pics != null) PicsStatsLabel(pics, textScale, widthPx)
                         HudLabel(spec.address, 14 * textScale, HudAddress, widthPx = widthPx,
                             quantum = startup, particles = 12)
                         return@Column
@@ -112,10 +114,11 @@ internal fun StatsPanel(
                         )
                     }
                     HudLabel(spec.walkingTime, 16 * textScale, HudText, quantum = quantum, particles = 12)
-                    spec.detail?.let {
+                    if (summary || pics == null) spec.detail?.let {
                         HudLabel(it, 14 * textScale, HudDetail, widthPx = widthPx,
                             quantum = if (summary) quantum else startup, particles = 8)
                     }
+                    if (pics != null) PicsStatsLabel(pics, textScale, widthPx)
                     if (summary) {
                         val hint = if (quantum == null) Modifier else Modifier.graphicsLayer { alpha = quantum.contentAlpha }
                         HudLabel("タップで新しく開始", 14 * textScale, HudDetail, hint, widthPx = widthPx)
