@@ -5,7 +5,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 export JAVA_HOME="${AURA_JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}"
 adb="${ADB:-${LOCALAPPDATA:?set ADB or LOCALAPPDATA}/Android/Sdk/platform-tools/adb.exe}"
 pkg=io.github.yamichi77.aurawalkinfo
-all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay
+all_checks=placement,headmotion,safety,walking,stopped,fast,nofix,map-replay,input,bigmap,session
 
 usage() {
     echo "使い方: bash scripts/device-check.sh [--preview] [--only $all_checks]" >&2
@@ -131,6 +131,176 @@ start_run() {
 
 replay_scenario() {
     adb_retry shell am broadcast -a "$pkg.REPLAY" -p "$pkg" --es scenario "$@" >> "$log"
+}
+
+debug_tap() {
+    adb_retry shell am broadcast -a "$pkg.DEBUG_TAP" -p "$pkg" --es target "$1" >> "$log"
+}
+
+t9_log() {
+    local pid
+    pid=$(adb_retry shell pidof -s "$pkg" | tr -d '\r') || return 1
+    [[ $pid =~ ^[0-9]+$ ]] || return 1
+    adb_retry logcat -d --pid="$pid" -v threadtime -t "$start_time" -s AuraInput AuraBigMap AuraPlacement AuraHud AuraSession
+}
+
+wait_for_t9_log() {
+    local pattern=$1 deadline=$((SECONDS + $2))
+    run_log=
+    while (( SECONDS < deadline )); do
+        run_log=$(t9_log) || return 1
+        if grep -Eq "$pattern" <<< "$run_log"; then return 0; fi
+        sleep 0.25
+    done
+    return 1
+}
+
+t9_physical_click() {
+    grep -Eq "AuraInput[[:space:]]*:[[:space:]]*CLICK target=$1 source=compose([[:space:]]|$)"
+}
+
+check_input() {
+    start_run t9-input -W --es fakeState stopped || return 0
+    local target prompt logs prior=0 size
+    for target in left map outside; do
+        case "$target" in
+            left) prompt='ポインターを左の数字に合わせてタップしてください' ;;
+            map) prompt='次に右下の地図をタップしてください' ;;
+            outside) prompt='大きい地図の外をタップしてください' ;;
+        esac
+        echo "$prompt（15秒）"
+        sleep 15
+        logs=$(t9_log) || logs=
+        printf '%s\n' "$logs" >> "$log"
+        if t9_physical_click "$target" < <(tail -n "+$((prior + 1))" <<< "$logs"); then
+            record PASS "input $target"
+        else
+            record FAIL "input $target"
+            printf '%s\n' "$logs"
+            if [[ $target == map ]]; then
+                echo '外側の入力を確認するため DEBUG_TAP で大きい地図を開きます。'
+                if ! debug_tap bigmap || ! debug_tap map; then
+                    record FAIL 'input 大きい地図の準備'
+                fi
+            fi
+        fi
+        size=$(wc -l <<< "$logs")
+        prior=$size
+    done
+}
+
+t9_map_expiry() {
+    awk -v expected="$1" '
+        /AuraBigMap[[:space:]]*: OPEN now=[0-9]+ deadline=[0-9]+[[:space:]]*$/ {
+            split($(NF-1), start, "="); split($NF, end, "=")
+            open = 1; elapsed = end[2] - start[2]
+        }
+        /AuraBigMap[[:space:]]*: CLOSED reason=timeout now=[0-9]+[[:space:]]*$/ && open {
+            split($NF, closed, "=")
+            late = closed[2] - end[2]
+            printf "bigmap expected=%d ms scheduled=%d ms actual=%d ms\n", expected, elapsed, closed[2] - start[2]
+            pass = elapsed == expected && late >= 0 && late <= 2000
+        }
+        END { exit !pass }
+    '
+}
+
+t9_fast_map() {
+    awk '
+        /AuraBigMap[[:space:]]*: OPEN / { opens++ }
+        /AuraBigMap[[:space:]]*: CLOSED reason=fast / && opens == 1 { closed = 1 }
+        /AuraInput[[:space:]]*: CLICK target=map source=debug ignored-fast/ && closed { refused = 1 }
+        END { exit !(opens == 1 && refused) }
+    '
+}
+
+check_bigmap() {
+    local state duration placement
+    for state in stopped walking; do
+        run_log=
+        duration=10000
+        if [[ $state == stopped ]]; then duration=30000; fi
+        placement=false
+        if [[ $state == stopped ]]; then placement=true; fi
+        if start_run "t9-bigmap-$state" -W --es fakeState "$state" --ez selfcheck "$placement" &&
+            debug_tap map; then
+            if $placement; then
+                echo '大きい地図の配置測定のため、正面を向いたまま頭を止めてください。'
+            fi
+            if wait_for_t9_log 'AuraBigMap[[:space:]]*: CLOSED reason=timeout' "$((duration / 1000 + 6))" &&
+                t9_map_expiry "$duration" <<< "$run_log" >> "$log"; then
+                record PASS "bigmap $state 自動終了"
+            else
+                record FAIL "bigmap $state 自動終了"
+            fi
+            if $placement; then
+                if grep -Eq 'AuraPlacement[[:space:]]*: BIGMAP PASS ' <<< "$run_log"; then
+                    record PASS 'bigmap 配置（左右0°、下4°、直径28°）'
+                else
+                    record FAIL 'bigmap 配置'
+                fi
+            fi
+            printf '%s\n' "$run_log" >> "$log"
+        else
+            record FAIL "bigmap $state 開始"
+        fi
+    done
+
+    run_log=
+    if start_run t9-bigmap-fast -W --es startMode auto --es fakeState replay --ez resetNotice true &&
+        debug_tap left && wait_for_t9_log 'AuraHud[[:space:]]*: notice dismissed by tap' 4 &&
+        replay_scenario fast --ef speed 4 &&
+        wait_for_t9_log 'AuraSession[[:space:]]*: SAMPLE 2[5-9] WALKING ' 12 &&
+        debug_tap map &&
+        wait_for_t9_log 'AuraBigMap[[:space:]]*: CLOSED reason=fast' 8 &&
+        debug_tap map &&
+        wait_for_t9_log 'AuraInput[[:space:]]*: CLICK target=map source=debug ignored-fast' 3 &&
+        t9_fast_map <<< "$run_log"; then
+        record PASS 'bigmap 高速移動で即座に閉じ、開き直さない'
+    else
+        record FAIL 'bigmap 高速移動'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    replay_scenario stop || record FAIL 'bigmap 再生停止'
+}
+
+t9_walk_phases() {
+    local actual
+    actual=$(sed -n 's/.*AuraSession[[:space:]]*:[[:space:]]*WALK phase=\([a-z]*\).*/\1/p' | paste -sd ' ' -)
+    [[ $actual == 'standby starting standby starting measuring ending measuring ending summary' ]]
+}
+
+t9_walk_measured() {
+    awk '
+        /AuraSession[[:space:]]*: SAMPLE / {
+            sub(/^.*: SAMPLE /, "")
+            if ($2 == "WALKING" && $5 > 0 && $6 > 0) found = 1
+        }
+        END { exit !found }
+    '
+}
+
+check_session() {
+    local args=(-W --es startMode standby --es fakeState replay --ez resetNotice true)
+    if $preview; then args+=(--ez preview2d true); fi
+    run_log=
+    if start_run t9-session "${args[@]}" &&
+        wait_for_t9_log 'AuraSession[[:space:]]*: WALK phase=standby' 5 &&
+        debug_tap left && wait_for_t9_log 'AuraHud[[:space:]]*: notice dismissed by tap' 4 &&
+        debug_tap left && sleep 1 && debug_tap left &&
+        debug_tap left && wait_for_t9_log 'AuraSession[[:space:]]*: WALK phase=measuring' 6 &&
+        replay_scenario walk_stop --ef speed 4 &&
+        wait_for_t9_log 'AuraSession[[:space:]]*: SAMPLE [0-9]+ WALKING [^ ]+ [^ ]+ [1-9][0-9.]* [1-9][0-9]* ' 12 &&
+        t9_walk_measured <<< "$run_log" &&
+        debug_tap left && sleep 1 && debug_tap left &&
+        debug_tap left && wait_for_t9_log 'AuraSession[[:space:]]*: WALK phase=summary' 6 &&
+        t9_walk_phases <<< "$run_log"; then
+        record PASS 'session 待機・開始と終了のキャンセル・walk_stop の計測・まとめ'
+    else
+        record FAIL 'session 待機からまとめまでの通し確認'
+    fi
+    printf '%s\n' "$run_log" >> "$log"
+    replay_scenario stop || record FAIL 'session 再生停止'
 }
 
 collect_run() {
@@ -406,7 +576,7 @@ save_safety_log() {
 
 check_safety() {
     local route=xr phase
-    local args=(-W --ez capture true)
+    local args=(-W --ez capture true --es startMode auto)
     if $preview; then
         route=2d
         args+=(--ez preview2d true)
@@ -414,7 +584,7 @@ check_safety() {
     run_log=
     if start_run t6b-notice "${args[@]}" --ez resetNotice true && replay_scenario walk_stop --ef speed 4 &&
         wait_for_safety_log 'notice dismissed by timeout' 22 &&
-        refresh_preview && wait_for_safety_log "capture hud-$route-left-stats\.png: [1-9]" 6; then
+        refresh_preview --es startMode auto && wait_for_safety_log "capture hud-$route-left-stats\.png: [1-9]" 6; then
         for phase in notice stats; do capture_panel t6b-notice "left-$phase" "$route"; done
         if awk -v route="$route" '
             function seconds(time, parts) {
@@ -442,7 +612,7 @@ check_safety() {
     run_log=
     if start_run t6b-fast "${args[@]}" && replay_scenario fast --ef speed 4 &&
         wait_for_safety_log 'TRANSITION .* -> FAST at ' 15 &&
-        refresh_preview && wait_for_safety_log "capture hud-$route-left-fast\.png: [1-9]" 6; then
+        refresh_preview --es startMode auto && wait_for_safety_log "capture hud-$route-left-fast\.png: [1-9]" 6; then
         if awk -v route="$route" '
             /AuraSession[[:space:]]*:[[:space:]]*TRANSITION / {
                 split($0, fields, " -> ")
@@ -474,7 +644,9 @@ main() {
     if $preview; then
         if selected placement; then record SKIP 'placement（装着が必要）'; fi
         if selected headmotion; then record SKIP 'headmotion（装着が必要）'; fi
-        if [[ $only =~ ^(placement|headmotion)(,(placement|headmotion))*$ ]]; then
+        if selected input; then record SKIP 'input（装着が必要）'; fi
+        if selected bigmap; then record SKIP 'bigmap（装着が必要）'; fi
+        if [[ $only =~ ^(placement|headmotion|input|bigmap)(,(placement|headmotion|input|bigmap))*$ ]]; then
             printf '%s\n' "${results[@]}"
             return 0
         fi
@@ -495,6 +667,9 @@ main() {
         if selected "$state"; then check_state "$state"; fi
     done
     if selected map-replay; then check_map_replay; fi
+    if ! $preview && selected input; then check_input; fi
+    if ! $preview && selected bigmap; then check_bigmap; fi
+    if selected session; then check_session; fi
     summary
     return "$failed"
 }

@@ -3,6 +3,7 @@ package io.github.yamichi77.aurawalkinfo
 import android.app.Application
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import io.github.yamichi77.aurawalkinfo.session.DefaultSessionStartMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,7 +14,7 @@ class AuraWalkApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container.walkSessionRepository.start(scope)
+        container.walkSessionRepository.start(scope, DefaultSessionStartMode)
     }
 }
 

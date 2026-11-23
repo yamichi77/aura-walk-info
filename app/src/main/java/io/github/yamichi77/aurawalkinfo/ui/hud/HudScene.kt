@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -13,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -34,6 +36,7 @@ import androidx.xr.compose.subspace.animation.follow.FollowTarget
 import androidx.xr.compose.subspace.animation.follow.TrackedDimensions
 import androidx.xr.compose.subspace.draw.alpha
 import androidx.xr.compose.subspace.layout.SubspaceModifier
+import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.onGloballyPositioned
 import androidx.xr.compose.subspace.layout.width
@@ -66,10 +69,12 @@ internal fun HudScene(
     locationDenied: Boolean,
     debug: HudDebugOptions,
     onNoticeTimeout: () -> Unit,
+    bigMapOpen: Boolean,
+    onTap: (HudTarget) -> Unit,
 ) {
     val session = LocalSession.current
     if (session == null) {
-        PhoneScreen(spec, locationDenied, debug, onNoticeTimeout)
+        PhoneScreen(spec, locationDenied, debug, onNoticeTimeout, bigMapOpen, onTap)
         return
     }
     val debugBuild = LocalContext.current.isDebugBuild()
@@ -91,6 +96,7 @@ internal fun HudScene(
     var showRotationFallback by remember(check) { mutableStateOf(false) }
     var tracking by remember(session) { mutableStateOf(false) }
     var hiddenForMotion by remember(session) { mutableStateOf(false) }
+    val checkBigMap by rememberUpdatedState(bigMapOpen && spec is HudVisualSpec.Clusters)
     LaunchedEffect(session, configured, check) {
         if (!configured) return@LaunchedEffect
         val device = ArDevice.getInstance(session)
@@ -99,6 +105,7 @@ internal fun HudScene(
         var peakSpeed = 0.0
         var lastSpeedLog = 0L
         var activeCheck = check
+        var bigMapReported = false
         while (true) {
             withFrameNanos { now ->
                 val state = device.state.value
@@ -129,6 +136,12 @@ internal fun HudScene(
                     showRotationFallback = fallback
                     activeCheck = null
                 }
+                if (!checkBigMap) bigMapReported = false
+                if (checkBigMap && !bigMapReported && pose != null && speed != null &&
+                    speed < HeadMotionGate.StationaryDegreesPerSecond
+                ) {
+                    bigMapReported = check?.sampleBigMap(session, pose) == true
+                }
             }
         }
     }
@@ -153,7 +166,7 @@ internal fun HudScene(
                 if (tracking || showRotationFallback) {
                     SpatialHudPanels(
                         session, it, spec, locationDenied, debug, check, motionOpacity?.value ?: 1f, tracking,
-                        showRotationFallback, onNoticeTimeout,
+                        showRotationFallback, onNoticeTimeout, bigMapOpen, onTap, !HideHudOnHeadMotion || !hiddenForMotion,
                     )
                 }
             }
@@ -174,29 +187,48 @@ private fun SpatialHudPanels(
     tracking: Boolean,
     showRotationFallback: Boolean,
     onNoticeTimeout: () -> Unit,
+    bigMapOpen: Boolean,
+    onTap: (HudTarget) -> Unit,
+    inputEnabled: Boolean,
 ) {
     val pixelDensity = session.scene.virtualPixelDensity
     val dpPerMeter = pixelDensity.convertMetersToPixels(1f) / LocalDensity.current.density
     val physicalDpPerMeter = dpPerMeter / scale
+    val mapVisible = spec is HudVisualSpec.Clusters && !locationDenied
+    val showBigMap = bigMapOpen && mapVisible
+    val bigMapAlpha by animateFloatAsState(if (showBigMap) 1f else 0f, tween(HudAnimationMillis))
 
     if (tracking) {
+        if (showBigMap && inputEnabled) {
+            val distance = 1.65f
+            SpatialPanel(
+                HudPlacement.modifier(HudPlacement.pose(0f, 0f, distance), dpPerMeter, scale)
+                    .width((2 * distance / Layout.distanceMeters * HudPlacement.planeHalfSpan(32f) * physicalDpPerMeter).dp)
+                    .height((2 * distance / Layout.distanceMeters * HudPlacement.planeHalfSpan(22f) * physicalDpPerMeter).dp),
+                shape = SpatialRoundedCornerShape(CornerSize(0.dp)),
+            ) {
+                Box(Modifier.fillMaxSize().hudClick(HudTarget.OUTSIDE, onTap))
+            }
+        }
         PlacedPanel(
             session, HudPanel.LEFT, HudPlacement.statsWidthMeters, HudPlacement.statsHeightMeters,
             dpPerMeter, scale, check, motionOpacity,
         ) {
             StatsPanel(
                 spec, locationDenied, Layout.textScale(physicalDpPerMeter),
-                Modifier.fillMaxSize().clipToBounds().capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
+                Modifier.fillMaxSize().clipToBounds().hudClick(HudTarget.LEFT, onTap, inputEnabled)
+                    .capturePanelOnNextDraw(debug.leftCaptureName("xr", spec)),
                 onNoticeTimeout,
             )
         }
 
-        if (spec is HudVisualSpec.Clusters && !locationDenied) {
+        if (spec is HudVisualSpec.Clusters && !locationDenied && !showBigMap) {
             val diameter by animateFloatAsState(spec.mapDiameter, tween(HudAnimationMillis))
             val size = HudPlacement.mapSizeMeters(diameter)
             PlacedPanel(session, HudPanel.RIGHT, size, size, dpPerMeter, scale, check, motionOpacity) {
-                MiniMapPanel(
-                    spec, debug, Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")),
+                ClickableMap(
+                    spec, debug, HudTarget.MAP, onTap,
+                    Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")), inputEnabled,
                 )
             }
         } else if (debug.capture && spec is HudVisualSpec.Fast) {
@@ -204,9 +236,17 @@ private fun SpatialHudPanels(
                 Box(Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "right")))
             }
         }
+        if (spec is HudVisualSpec.Clusters && !locationDenied && (showBigMap || bigMapAlpha > 0f)) {
+            val size = HudPlacement.bigMapSizeMeters
+            PlacedPanel(
+                session, HudPanel.BIGMAP, size, size, dpPerMeter, scale, check, motionOpacity * bigMapAlpha,
+            ) {
+                ClickableMap(spec, debug, HudTarget.BIGMAP, onTap, Modifier.fillMaxSize(), showBigMap && inputEnabled)
+            }
+        }
     }
 
-    if (debug.grid && (tracking || showRotationFallback)) {
+    if (debug.grid && !showBigMap && (tracking || showRotationFallback)) {
         PlacedPanel(session, HudPanel.GRID, gridWidthMeters, gridHeightMeters, dpPerMeter, scale, check) {
             DebugAngleGrid(Modifier.fillMaxSize().capturePanelOnNextDraw(debug.captureName("xr", "grid")))
         }
@@ -247,8 +287,10 @@ private fun PlacedPanel(
     val placement = HudPlacement.modifier(pose, dpPerMeter, scale).alpha(motionOpacity)
     val size = SubspaceModifier.width((width * dpPerMeter / scale).dp)
         .height((height * dpPerMeter / scale).dp)
+    val shape = if (name == HudPanel.BIGMAP) SpatialRoundedCornerShape(CornerSize(50)) else null
     if (check == null) {
-        SpatialPanel(placement.then(size), content = content)
+        if (shape == null) SpatialPanel(placement.then(size), content = content)
+        else SpatialPanel(placement.then(size), shape = shape, content = content)
     } else {
         // The wrapper and its sole, centered SpatialPanel share a center and normal.
         var entity by remember { mutableStateOf<Entity?>(null) }
@@ -258,8 +300,7 @@ private fun PlacedPanel(
             DisposableEffect(reference, check, name) {
                 onDispose { check.panels.remove(name) }
             }
-            SpatialPanel(
-                size.onGloballyPositioned { coordinates ->
+            val measuredSize = size.onGloballyPositioned { coordinates ->
                     if (reference != null) {
                         check.panels[name] = HudPlacementCheck.Panel(
                             reference,
@@ -267,9 +308,9 @@ private fun PlacedPanel(
                             pixels.convertPixelsToMeters(coordinates.size.height.toFloat()) * scale,
                         )
                     }
-                },
-                content = content,
-            )
+                }
+            if (shape == null) SpatialPanel(measuredSize, content = content)
+            else SpatialPanel(measuredSize, shape = shape, content = content)
         }
     }
 }

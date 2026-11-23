@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -62,29 +64,57 @@ class WalkSessionRepository internal constructor(
     private val mutableState = MutableStateFlow(WalkSessionState())
     val state: StateFlow<WalkSessionState> = mutableState.asStateFlow()
     private var sessionJob: Job? = null
+    private data class Measurement(val active: Boolean, val legacyReplay: Boolean)
+    private val measurement = MutableStateFlow(Measurement(active = true, legacyReplay = true))
 
-    /** Starts one session. The caller owns the scope and cancels it when the session ends. */
+    private sealed interface Event {
+        data class Input(val sample: LocationSample?) : Event
+        data class Control(val measurement: Measurement) : Event
+    }
+
+    fun start(scope: CoroutineScope): Job = start(scope, SessionStartMode.AUTO)
+
+    /** Starts location observation, which outlives individual walks. */
     @Synchronized
-    fun start(scope: CoroutineScope): Job {
+    internal fun start(scope: CoroutineScope, mode: SessionStartMode): Job {
         sessionJob?.takeUnless { it.isCompleted }?.let { return it }
 
         mutableState.value = WalkSessionState()
+        configure(mode, legacyReplay = true)
         return scope.launch {
             inputs.collectLatest { runSession(it) }
         }.also { sessionJob = it }
     }
 
+    internal fun configure(mode: SessionStartMode, legacyReplay: Boolean) {
+        measurement.value = Measurement(mode == SessionStartMode.AUTO, legacyReplay)
+    }
+
+    internal fun setMeasuring(active: Boolean) {
+        measurement.value = Measurement(active, legacyReplay = false)
+    }
+
     private suspend fun runSession(input: WalkSessionInput) = coroutineScope {
         val clock = input.clock
-        val startedAt = clock.elapsedRealtimeMillis()
-        mutableState.value = WalkSessionState()
         val classifier = MotionClassifier(distanceCalculator)
-        val distance = DistanceTracker(distanceCalculator)
+        var distance = DistanceTracker(distanceCalculator)
         val addressPoints = Channel<LocationSample>(Channel.CONFLATED)
-        val metrics = input.record?.let { record ->
+        fun openMetrics() = input.record?.let { record ->
             Channel<SessionMetrics>(Channel.BUFFERED).also { channel ->
                 launch { record(channel.receiveAsFlow()) }
             }
+        }
+
+        fun Measurement.isActive() = active || (input.replay && legacyReplay)
+        val firstTime = clock.elapsedRealtimeMillis()
+        var startedAt = firstTime.takeIf { measurement.value.isActive() }
+        var metrics = if (startedAt != null) openMetrics() else null
+        mutableState.update { previous ->
+            if (startedAt != null) WalkSessionState() else WalkSessionState(
+                distanceMeters = previous.distanceMeters,
+                elapsedMillis = previous.elapsedMillis,
+                walkingTimeMillis = previous.walkingTimeMillis,
+            )
         }
         launch {
             input.addresses(addressPoints.receiveAsFlow()).collect { address ->
@@ -92,7 +122,7 @@ class WalkSessionRepository internal constructor(
             }
         }
 
-        var lastUpdateAt = startedAt
+        var lastUpdateAt = firstTime
         var walkingTime = 0L
         var motion = MotionState.NO_FIX
         var latest: LocationSample? = null
@@ -101,21 +131,52 @@ class WalkSessionRepository internal constructor(
         var reportedDistance = 0.0
         var intervalAccuracy: Float? = null
         var intervalDecision: FixDecision? = null
-        input.locations.sessionEvents(input.ticks).collect { incoming ->
+        channelFlow {
+            val control = launch { measurement.collect { send(Event.Control(it)) } }
+            try {
+                input.locations.sessionEvents(input.ticks).collect { send(Event.Input(it)) }
+            } finally {
+                control.cancel()
+            }
+        }.buffer(Channel.RENDEZVOUS).collect { event ->
             val now = clock.elapsedRealtimeMillis()
             val previous = latest
             val fixDeadline = previous?.let { it.elapsedRealtimeMillis + MotionThresholds.NO_FIX_MILLIS }
-            if (motion == MotionState.WALKING && fixDeadline != null) {
+            val start = startedAt
+            if (start != null && motion == MotionState.WALKING && fixDeadline != null) {
                 walkingTime += (minOf(now, fixDeadline) - lastUpdateAt).coerceAtLeast(0L)
             }
             lastUpdateAt = now
 
+            if (event is Event.Control) {
+                val active = event.measurement.isActive()
+                if (active && start == null) {
+                    startedAt = now
+                    distance = DistanceTracker(distanceCalculator)
+                    walkingTime = 0
+                    reportedDistance = 0.0
+                    lastReportedSecond = if (input.replay) -1L else 0L
+                    intervalAccuracy = null
+                    intervalDecision = null
+                    metrics = openMetrics()
+                    mutableState.update { it.copy(distanceMeters = 0.0, walkingTimeMillis = 0, elapsedMillis = 0) }
+                } else if (!active && start != null) {
+                    startedAt = null
+                    metrics?.close()
+                    metrics = null
+                    mutableState.update { it.copy(walkingTimeMillis = walkingTime, elapsedMillis = now - start) }
+                }
+                return@collect
+            }
+            val incoming = (event as Event.Input).sample
             val sample = incoming?.takeIf {
                 previous == null || it.elapsedRealtimeMillis > previous.elapsedRealtimeMillis
             }
             if (sample != null) {
                 // A new fix can land before a tick observes the expired one.
-                if (fixDeadline != null && (now >= fixDeadline || sample.elapsedRealtimeMillis >= fixDeadline)) {
+                if (start != null && fixDeadline != null &&
+                    (now >= fixDeadline || sample.elapsedRealtimeMillis >= fixDeadline)
+                ) {
                     distance.update(MotionState.NO_FIX)
                 }
                 latest = sample
@@ -127,28 +188,29 @@ class WalkSessionRepository internal constructor(
             } else {
                 motion = classifier.onTick(now)
             }
-            val decision = distance.update(motion, sample)
-            if (sample != null) {
+            if (start != null && sample != null) {
                 intervalAccuracy = sample.accuracyMeters
-                intervalDecision = decision
+                intervalDecision = distance.update(motion, sample.takeIf { it.elapsedRealtimeMillis >= start })
+            } else if (start != null) {
+                distance.update(motion)
             }
 
             val fix = latest
-            val elapsed = now - startedAt
+            val elapsed = start?.let { now - it }
             mutableState.update {
                 it.copy(
-                    distanceMeters = distance.distanceMeters,
-                    walkingTimeMillis = walkingTime,
-                    elapsedMillis = elapsed,
+                    distanceMeters = if (start != null) distance.distanceMeters else it.distanceMeters,
+                    walkingTimeMillis = if (start != null) walkingTime else it.walkingTimeMillis,
+                    elapsedMillis = elapsed ?: it.elapsedMillis,
                     motionState = motion,
                     mapCenter = fix?.let { MapCenter(it.latitude, it.longitude) },
                     mapBearingDeg = bearing,
                     lastFixAccuracyMeters = fix?.accuracyMeters,
                 )
             }
-            val elapsedSeconds = elapsed / 1_000
-            if (metrics != null && (input.replay || incoming == null) && elapsedSeconds > lastReportedSecond) {
-                metrics.trySend(
+            val elapsedSeconds = elapsed?.div(1_000)
+            if (elapsedSeconds != null && (input.replay || incoming == null) && elapsedSeconds > lastReportedSecond) {
+                metrics?.trySend(
                     SessionMetrics(
                         elapsedSeconds, motion, classifier.averageSpeedMps,
                         if (input.replay) fix?.accuracyMeters else intervalAccuracy,

@@ -11,6 +11,7 @@ import android.view.ViewOutlineProvider
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
@@ -88,6 +89,7 @@ internal fun MiniMapPanel(
     spec: HudVisualSpec.Clusters,
     debug: HudDebugOptions,
     modifier: Modifier = Modifier,
+    zoom: Float = MAP_ZOOM,
 ) {
     val context = LocalContext.current
     val hasKey = remember(context) { context.hasMapsKey() }
@@ -111,7 +113,7 @@ internal fun MiniMapPanel(
 
     BoxWithConstraints(modifier) {
         if (center != null && hasKey) {
-            val position = CameraPosition(LatLng(center.latitude, center.longitude), MAP_ZOOM, 0f, spec.mapBearingDeg)
+            val position = CameraPosition(LatLng(center.latitude, center.longitude), zoom, 0f, spec.mapBearingDeg)
             // Equal padding keeps SDK attribution inside the circle and the camera target centered.
             val padding = PaddingValues(minOf(maxWidth, maxHeight) * 0.15f)
             MiniMapSurface(
@@ -120,6 +122,30 @@ internal fun MiniMapPanel(
             )
         }
         MiniMapPlaceholder(spec, Modifier.fillMaxSize())
+    }
+}
+
+@Composable
+internal fun ClickableMap(
+    spec: HudVisualSpec.Clusters,
+    debug: HudDebugOptions,
+    target: HudTarget,
+    onTap: (HudTarget) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Box(modifier) {
+        val large = target == HudTarget.BIGMAP
+        MiniMapPanel(
+            spec = if (large) spec.copy(
+                opacity = spec.opacity, mapOpacity = spec.opacity, mapLineOpacity = 0.4f,
+                mapDiameter = HudPlacement.bigMapDiameter,
+            ) else spec,
+            debug = if (large) debug.copy(selfCheck = false) else debug,
+            modifier = Modifier.matchParentSize(),
+            zoom = if (large) 16.5f else MAP_ZOOM,
+        )
+        Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.xr.scenecore.Entity
 import androidx.xr.scenecore.PanelEntity
 import androidx.xr.scenecore.Space
 import androidx.xr.scenecore.scene
+import io.github.yamichi77.aurawalkinfo.ui.hud.HudPlacement
 import io.github.yamichi77.aurawalkinfo.safety.HeadMotionGate
 import io.github.yamichi77.aurawalkinfo.safety.HideHudOnHeadMotion
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
@@ -22,6 +23,7 @@ internal enum class HudPanel(val yaw: Float, val pitch: Float) {
     LEFT(Layout.leftYaw, Layout.pitch),
     RIGHT(Layout.rightYaw, Layout.pitch),
     GRID(0f, 0f),
+    BIGMAP(0f, HudPlacement.bigMapPitch),
 }
 
 internal class HudPlacementCheck(includeGrid: Boolean) {
@@ -38,6 +40,25 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
     private var visibleSamples = 0
     private var missingPanelSamples = 0
     private var hiddenGridSamples = 0
+
+    /** Report the measured panel after layout, independently of the regular placement window. */
+    fun sampleBigMap(session: Session, headPose: Pose): Boolean {
+        val name = HudPanel.BIGMAP
+        val panel = panels[name] ?: return false
+        if (panel.entity.isDisposed || panel.width <= 0 || panel.height <= 0) return false
+        if (panelOpacity(name)?.let { it > 0f } != true) return false
+        val scene = session.scene
+        val inverseHead = scene.perceptionSpace.transformPoseTo(headPose, scene.activitySpace).inverse
+        val relative = inverseHead.compose(panel.entity.getPose(Space.ACTIVITY))
+        val measured = measure(name, relative, panel.width, panel.height)
+        val diameter = Math.toDegrees(atan2(minOf(panel.width, panel.height) / 2, measured.distance).toDouble()) * 2
+        val pass = abs(measured.yaw - name.yaw) <= 1 && abs(measured.pitch - name.pitch) <= 1 &&
+            abs(diameter - HudPlacement.bigMapDiameter) <= 1 && abs(panel.width - panel.height) <= 0.01f &&
+            abs(measured.distance - Layout.distanceMeters) <= 0.05f
+        Log.i(Tag, "BIGMAP ${verdict(pass)} yaw=${decimal(measured.yaw)} pitch=${decimal(measured.pitch)} " +
+            "diameter=${decimal(diameter)} distance=${decimal(measured.distance.toDouble(), 3)}")
+        return true
+    }
 
     /** Null while sampling. True at completion if the visual A/B fallback is needed. */
     fun sample(session: Session, now: Long, pose: Pose?, speed: Double?, hiddenSince: Long?): Boolean? {
@@ -167,7 +188,7 @@ private fun measure(name: HudPanel, pose: Pose, width: Float, height: Float): Me
                 yawOf(center + u * kotlin.math.cos(angle).toFloat() + v * kotlin.math.sin(angle).toFloat())
             }
         }
-        HudPanel.GRID -> 0.0 // Its transparent panel intentionally spans the center.
+        HudPanel.GRID, HudPanel.BIGMAP -> 0.0 // These panels intentionally span the center.
     }
     return Measurement(yaw, pitch, innerEdge, normal, distance)
 }

@@ -49,6 +49,10 @@ internal object HudPlacement {
 
     fun planeHalfSpan(degrees: Float) = Layout.distanceMeters * tangent(degrees)
 
+    const val bigMapPitch = -4f
+    const val bigMapDiameter = 28f
+    val bigMapSizeMeters = 2 * planeHalfSpan(bigMapDiameter / 2)
+
     // Allow for layout's integer pixel rounding at the inside edges.
     private const val roundingMarginDegrees = 0.08f
     private val maxInnerHalfYaw = Layout.rightYaw - Layout.clearZoneDegrees -

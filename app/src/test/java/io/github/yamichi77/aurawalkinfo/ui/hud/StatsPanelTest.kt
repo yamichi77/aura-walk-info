@@ -12,6 +12,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.yamichi77.aurawalkinfo.safety.HudVisibility
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.safety.SafetyNotice
+import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.theme.AdditiveDisplayTheme
 import org.junit.Rule
@@ -57,6 +58,42 @@ class StatsPanelTest {
         show(MotionState.NO_FIX, denied = true)
         displayed("位置の権限がありません")
         absent("1.24", "GPS 測位中…")
+    }
+
+    @Test
+    fun walkControlsShowStandbyCountdownsSummaryAndFastOverride() {
+        val phase = mutableStateOf<WalkPhase>(WalkPhase.Standby)
+        val motion = mutableStateOf(MotionState.STOPPED)
+        val seconds = mutableStateOf(3)
+        val dpPerMeter = 720f
+        compose.setContent {
+            AdditiveDisplayTheme {
+                StatsPanel(
+                    hudVisualSpecFor(hudTestState(motion.value), phase = phase.value, countdown = seconds.value),
+                    false, Layout.textScale(dpPerMeter),
+                    Modifier.size(
+                        (HudPlacement.statsWidthMeters * dpPerMeter).dp,
+                        (HudPlacement.statsHeightMeters * dpPerMeter).dp,
+                    ),
+                )
+            }
+        }
+        displayed("タップで開始", "みほん市試験町1丁目")
+        absent("1.24", "歩行 18:42", "架空県みほん市")
+        compose.runOnIdle { phase.value = WalkPhase.Starting(3_000) }
+        displayed("3", "タップでキャンセル")
+        compose.runOnIdle { seconds.value = 2 }
+        displayed("2")
+        compose.runOnIdle { seconds.value = 1 }
+        displayed("1")
+        compose.runOnIdle { phase.value = WalkPhase.Ending(6_000) }
+        displayed("終了 1", "タップでキャンセル")
+        compose.runOnIdle { phase.value = WalkPhase.Summary }
+        displayed("おつかれさま", "1.24", "km", "歩行 18:42", "経過 21:05 ・ 15'05\"/km", "タップで新しく開始")
+        absent("タップでキャンセル", "みほん市試験町1丁目")
+        compose.runOnIdle { motion.value = MotionState.FAST }
+        displayed("高速移動中のため非表示")
+        absent("おつかれさま", "タップで新しく開始")
     }
 
     @Test

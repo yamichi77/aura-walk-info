@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import io.github.yamichi77.aurawalkinfo.location.AddressState
 import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
+import io.github.yamichi77.aurawalkinfo.session.WalkPhase
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 import io.github.yamichi77.aurawalkinfo.ui.format.FormattedDistance
@@ -42,6 +43,8 @@ internal sealed interface HudVisualSpec {
         val mapCenter: MapCenter? = null,
         val mapBearingDeg: Float = 0f,
         val mapOpacity: Float = opacity,
+        val phase: WalkPhase = WalkPhase.Measuring,
+        val countdown: Int? = null,
     ) : HudVisualSpec
 }
 
@@ -49,6 +52,8 @@ internal fun hudVisualSpecFor(
     state: WalkSessionState,
     userHidden: Boolean = false,
     noticePending: Boolean = false,
+    phase: WalkPhase = WalkPhase.Measuring,
+    countdown: Int? = null,
 ): HudVisualSpec {
     if (state.motionState == MotionState.FAST) return HudVisualSpec.Fast
     if (userHidden) return HudVisualSpec.Hidden
@@ -56,20 +61,20 @@ internal fun hudVisualSpecFor(
     val noFix = state.motionState == MotionState.NO_FIX
     val opacity = if (stopped) 1f else 0.7f
     val detail = when {
-        noFix -> "GPS 測位中…"
-        stopped -> listOfNotNull(
+        stopped || phase == WalkPhase.Summary -> listOfNotNull(
             formatElapsedTime(state.elapsedMillis),
             formatAveragePace(state.walkingTimeMillis, state.distanceMeters),
         ).joinToString(" ・ ")
+        noFix -> "GPS 測位中…"
         else -> null
     }
     return HudVisualSpec.Clusters(
         opacity = opacity,
         distance = formatDistance(state.distanceMeters),
-        distanceColor = if (noFix) HudDimmed else HudText,
+        distanceColor = if (noFix && phase != WalkPhase.Summary) HudDimmed else HudText,
         walkingTime = formatWalkingTime(state.walkingTimeMillis),
         detail = detail,
-        address = formatAddress(state.address, multiline = stopped),
+        address = formatAddress(state.address, multiline = stopped && phase != WalkPhase.Standby),
         addressLines = if (stopped) 2 else 1,
         addressColor = if (noFix || (state.address as? AddressState.Available)?.stale == true) HudDimmed else HudAddress,
         mapDiameter = if (stopped) Layout.stoppedDiameter else Layout.walkingDiameter,
@@ -79,5 +84,7 @@ internal fun hudVisualSpecFor(
         mapCenter = state.mapCenter,
         mapBearingDeg = state.mapBearingDeg ?: 0f,
         mapOpacity = if (noFix) 0.3f else opacity,
+        phase = phase,
+        countdown = countdown,
     )
 }
