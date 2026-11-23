@@ -10,8 +10,7 @@ internal fun markStrokes(
     center: MarkVector,
     forward: MarkVector,
     up: MarkVector,
-    signalDots: Int,
-): List<List<MarkStroke>> {
+): List<MarkStroke> {
     val right = forward.cross(up)
     fun point(x: Double, y: Double, z: Double) = center + right * x + up * y + forward * z
     fun loop(points: List<MarkVector>, width: Double) =
@@ -31,24 +30,13 @@ internal fun markStrokes(
             )
             val top = outline.map { (x, z) -> point(x, 0.18, z) }
             val bottom = outline.map { (x, z) -> point(x, -0.18, z) }
-            listOf(loop(top, 0.035) + loop(bottom, 0.035) + top.zip(bottom) { a, b -> MarkStroke(a, b, 0.035) })
+            loop(top, 0.035) + loop(bottom, 0.035) + top.zip(bottom) { a, b -> MarkStroke(a, b, 0.035) }
         }
         MarkKind.DESTINATION -> {
             val top = center + up * (40.0 - kind.baseHeight)
-            listOf(listOf(MarkStroke(center, top, 0.3)) + ring(right, forward, top, 0.6, 0.06, 16))
+            listOf(MarkStroke(center, top, 0.3)) + ring(right, forward, top, 0.6, 0.06, 16)
         }
-        MarkKind.SIGNAL -> buildList {
-            add(ring(right, up, center, 0.5, 0.025, 16))
-            val columns = 4
-            val rows = (signalDots + columns - 1) / columns
-            repeat(signalDots) { index ->
-                val row = index / columns
-                val rowSize = minOf(columns, signalDots - row * columns)
-                val x = (index % columns - (rowSize - 1) / 2.0) * 0.16
-                val y = ((rows - 1) / 2.0 - row) * 0.16
-                add(ring(right, up, point(x, y, 0.0), 0.05, 0.026, 8))
-            }
-        }
+        MarkKind.SIGNAL -> error("Signal totems use a panel")
     }
 }
 
@@ -94,7 +82,7 @@ internal fun MarkView.clip(
 }
 
 // Two crossed ribbons keep a stroke visible from different viewpoints. Their interiors
-// depict only the stroke width; there are no faces across the arrow, rings, or signal dots.
+// depict only the stroke width; there are no faces across the arrow or ring.
 internal fun MarkStroke.clippedTriangles(view: MarkView, up: MarkVector, right: MarkVector): List<MarkVector> {
     val direction = end - start
     // The margin can change by at most 1 + tan(5°) per meter.

@@ -111,7 +111,7 @@ internal data class SkyMark(
     val kind: SkyMarkKind,
     val yaw: Float,
     val distance: String? = null,
-    val signal: PicsHudDisplay? = null,
+    val signal: SkySignalMark? = null,
 )
 
 internal data class SkyBandFrame(val status: SkyBandStatus, val marks: List<SkyMark> = emptyList())
@@ -160,7 +160,7 @@ internal fun skyBandFrame(
         targets.intersection?.let { intersection ->
             val yaw = relativeSkyYaw(intersection.bearingDeg, head)
             if (abs(yaw) <= VisibleYaw) {
-                add(SkyMark(SkyMarkKind.SIGNAL, yaw.toFloat(), signal = intersection.toHudDisplay()))
+                add(SkyMark(SkyMarkKind.SIGNAL, yaw.toFloat(), signal = intersection.toSkySignalMark()))
             }
         }
     }

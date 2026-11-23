@@ -7,7 +7,7 @@ import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavRoute
 import io.github.yamichi77.aurawalkinfo.nav.NavState
 import io.github.yamichi77.aurawalkinfo.nav.NavStep
-import io.github.yamichi77.aurawalkinfo.pics.MAX_PICS_LIGHTS
+import io.github.yamichi77.aurawalkinfo.pics.PicsFreshness
 import io.github.yamichi77.aurawalkinfo.pics.PicsAspect
 import io.github.yamichi77.aurawalkinfo.pics.PicsLight
 import io.github.yamichi77.aurawalkinfo.pics.PicsPacket
@@ -157,17 +157,17 @@ class SpatialMarkModelTest {
         assertEquals(MarkReason.NO_SIGNAL, status(stopped))
         update(30.0)
         assertEquals(MarkReason.SHOW, status(stopped))
-        assertEquals(MarkReason.NO_SIGNAL, status(MotionState.WALKING))
+        // The renderer checks the current motion even if the receiver's last candidate still exists.
+        val candidate = tracker.nearest(stopped, trackedCenter)
+        assertEquals(MarkReason.NO_SIGNAL, decideMark(MarkKind.SIGNAL, origin, NavState.Idle, candidate, MotionState.WALKING).reason)
+        assertEquals(MarkReason.NO_SIGNAL, decideMark(MarkKind.SIGNAL, origin, NavState.Idle, candidate, MotionState.FAST).reason)
+        now = 1_499
+        assertEquals(PicsFreshness.FRESH, tracker.nearest(stopped, trackedCenter)?.freshness)
+        now = 1_500
+        assertEquals(PicsFreshness.STALE, tracker.nearest(stopped, trackedCenter)?.freshness)
+        assertEquals(MarkReason.SHOW, status(stopped))
         now = 3_001
         assertEquals(MarkReason.NO_SIGNAL, status(stopped))
-    }
-
-    @Test fun signalOutlineContainsASeparateDotForEveryLightInThePacket() {
-        val outline = markStrokes(MarkKind.SIGNAL, zero, north, MarkVector.UP, MAX_PICS_LIGHTS)
-        assertEquals(MAX_PICS_LIGHTS + 1, outline.size)
-        assertTrue(outline.drop(1).all { dot ->
-            dot.all { it.start.length() + it.width / 2 < 0.5 }
-        })
     }
 
     @Test fun fadeUsesThreeHundredMillisecondsAndFastCutsItImmediately() {
