@@ -78,3 +78,9 @@ $pkg = "io.github.yamichi77.aurawalkinfo"
 
 - `FollowMode.tight` でも頭の回転中に HUD の追従が最大約5°遅れ、右クラスタの内側の端は一時的に右11.8°まで中央クリアゾーンに入った。静止時の揺れは ±1° 程度だった（`build/device-check/20261122-235905/log.txt` の `AuraPlacement`）。
 - パックのタッチパッドのタップは Full Space の HUD でアプリに届かず、`AuraInput` にイベントは記録されなかった。システムのポインター操作になっていると推測されるが未確認。
+
+## ハンドトラッキングのタップ（T9、2026-11-23）
+
+- AURA は `android.hardware.xr.input.hand_tracking` を持つ。
+- 手を伸ばしてつまむ操作は、HUD の SpatialPanel の中の Compose `Modifier.clickable` に届いた（`AuraInput: CLICK target=left|map|bigmap source=compose`）。左クラスタのタップで開始のカウントダウンとキャンセル、右下の地図のタップで大きい地図の開閉を確認した。
+- パックのタッチパッドのタップは、引き続きアプリに届かない（T8 の記録）。操作はハンドトラッキングのタップを前提にする。
