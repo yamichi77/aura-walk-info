@@ -52,8 +52,8 @@ internal object HudPlacement {
     const val bigMapPitch = -4f
     const val bigMapDiameter = 28f
     val bigMapSizeMeters = 2 * planeHalfSpan(bigMapDiameter / 2)
-    val countdownWidthMeters = 2 * planeHalfSpan(7f)
-    val countdownHeightMeters = 2 * planeHalfSpan(5f)
+    val countdownWidthMeters = 2 * planeHalfSpan(8f)
+    val countdownHeightMeters = 2 * planeHalfSpan(7f)
     val countdownDigitHeightMeters = 2 * planeHalfSpan(2f)
     val bigMapArrowHeightMeters get() = mapArrowHeight(mapSizeMeters(Layout.walkingDiameter))
 

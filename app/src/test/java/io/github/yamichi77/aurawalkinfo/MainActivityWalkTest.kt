@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -47,14 +48,16 @@ class MainActivityWalkTest {
             val map = compose.onNodeWithTag("map")
             fun textIn(tag: String, text: String) =
                 compose.onNode(hasAnyAncestor(hasTestTag(tag)) and hasText(text), useUnmergedTree = true)
+            fun digitIn(tag: String, digit: String) =
+                compose.onNode(hasAnyAncestor(hasTestTag(tag)) and hasContentDescription(digit), useUnmergedTree = true)
 
             left.performClick()
             countdown.assertIsDisplayed()
             textIn("countdown", "開始").assertIsDisplayed()
-            textIn("countdown", "3").assertIsDisplayed()
+            digitIn("countdown", "3").assertIsDisplayed()
             textIn("countdown", "タップでキャンセル").assertIsDisplayed()
             textIn("left", "タップで開始").assertIsDisplayed()
-            textIn("left", "3").assertDoesNotExist()
+            digitIn("left", "3").assertDoesNotExist()
             map.performClick()
             compose.onNodeWithTag("bigmap").assertDoesNotExist()
             assertTrue(ShadowLog.getLogsForTag("AuraInput").any {
@@ -63,9 +66,9 @@ class MainActivityWalkTest {
 
             val main = shadowOf(Looper.getMainLooper())
             main.idleFor(Duration.ofSeconds(1))
-            textIn("countdown", "2").assertIsDisplayed()
+            digitIn("countdown", "2").assertIsDisplayed()
             main.idleFor(Duration.ofSeconds(1))
-            textIn("countdown", "1").assertIsDisplayed()
+            digitIn("countdown", "1").assertIsDisplayed()
             countdown.performClick()
             countdown.assertDoesNotExist()
             assertEquals(WalkPhase.Standby, controls.phase)
@@ -78,10 +81,10 @@ class MainActivityWalkTest {
             assertEquals(WalkPhase.Measuring, controls.phase)
             left.performClick()
             textIn("countdown", "終了").assertIsDisplayed()
-            textIn("countdown", "3").assertIsDisplayed()
+            digitIn("countdown", "3").assertIsDisplayed()
             textIn("countdown", "タップでキャンセル").assertIsDisplayed()
             textIn("left", "歩行 00:00").assertIsDisplayed()
-            textIn("left", "3").assertDoesNotExist()
+            digitIn("left", "3").assertDoesNotExist()
             countdown.performClick()
             assertEquals(WalkPhase.Measuring, controls.phase)
             left.performClick()
