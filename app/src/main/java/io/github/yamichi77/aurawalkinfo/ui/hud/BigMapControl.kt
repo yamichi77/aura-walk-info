@@ -34,8 +34,9 @@ internal data class BigMapControl(
             HudTarget.MAP -> if (current.isOpen || motion == MotionState.FAST) current else {
                 BigMapControl(deadline(now, motion)).advance(now, motion, destinationInput)
             }
-            HudTarget.OUTSIDE -> BigMapControl()
-            HudTarget.LEFT, HudTarget.COUNTDOWN, HudTarget.BIGMAP -> current
+            // A plain tap on the map closes it again (2026-11-24 user request). Drags and holds do not tap.
+            HudTarget.OUTSIDE, HudTarget.BIGMAP -> BigMapControl()
+            HudTarget.LEFT, HudTarget.COUNTDOWN -> current
             HudTarget.BIGMAP_MODE, HudTarget.BIGMAP_ZOOM_IN, HudTarget.BIGMAP_ZOOM_OUT, HudTarget.BIGMAP_RECENTER,
             HudTarget.NAV_DESTINATION, HudTarget.NAV_CANDIDATE_1, HudTarget.NAV_CANDIDATE_2,
             HudTarget.NAV_CANDIDATE_3, HudTarget.NAV_START, HudTarget.NAV_CANCEL ->

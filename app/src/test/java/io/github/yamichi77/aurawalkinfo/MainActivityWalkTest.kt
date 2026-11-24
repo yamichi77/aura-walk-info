@@ -165,6 +165,8 @@ class MainActivityWalkTest {
             assertTrue(checkNotNull(controls.map.closesAt) >= checkNotNull(deadline) + 2_000L)
             compose.onNodeWithTag("quantum-bigmap").assertDoesNotExist()
             big.performTouchInput { click() }
+            big.assertDoesNotExist()
+            mini.assertIsDisplayed().performClick()
             big.assertIsDisplayed()
             compose.onNodeWithTag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
             toggle.assertDoesNotExist()

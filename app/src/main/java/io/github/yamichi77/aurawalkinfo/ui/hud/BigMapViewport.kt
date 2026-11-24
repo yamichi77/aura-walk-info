@@ -54,6 +54,7 @@ internal fun Modifier.bigMapGestures(
     onPan: (Offset) -> Unit,
     onHold: (Offset) -> Unit,
     onOutside: () -> Unit,
+    onTap: () -> Unit = {},
 ) = pointerInput(Unit) {
     awaitEachGesture {
         val down = awaitFirstDown()
@@ -73,7 +74,13 @@ internal fun Modifier.bigMapGestures(
         if (result == null) {
             onHold(down.position)
         } else {
-            val firstDrag = result.getOrNull() ?: return@awaitEachGesture
+            val firstDrag = result.getOrNull()
+            if (firstDrag == null) {
+                // Released before the touch slop and before the hold: a plain tap closes the big map.
+                val released = currentEvent.changes.firstOrNull { it.id == down.id }?.pressed == false
+                if (released) onTap()
+                return@awaitEachGesture
+            }
             drag(firstDrag.id) { change ->
                 val delta = change.positionChange()
                 change.consume()

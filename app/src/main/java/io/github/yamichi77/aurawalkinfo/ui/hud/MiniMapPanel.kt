@@ -227,9 +227,13 @@ internal fun ClickableMap(
                 }
             }
             val onOutside by rememberUpdatedState { onTap(HudTarget.OUTSIDE) }
+            // A plain tap closes the map only in the normal map view, not while choosing a destination.
+            val onMapTap by rememberUpdatedState {
+                if (spec.destinationPrompt == DestinationPrompt.Map) onTap(HudTarget.BIGMAP)
+            }
             Box(
                 Modifier.matchParentSize().testTag("bigmap").then(
-                    if (enabled) Modifier.bigMapGestures({ onPan(it) }, { onHold(it) }, { onOutside() })
+                    if (enabled) Modifier.bigMapGestures({ onPan(it) }, { onHold(it) }, { onOutside() }, { onMapTap() })
                     else Modifier,
                 ),
             )

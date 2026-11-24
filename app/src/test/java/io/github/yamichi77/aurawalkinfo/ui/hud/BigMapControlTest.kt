@@ -92,13 +92,13 @@ class BigMapControlTest {
     }
 
     @Test
-    fun fastClosesImmediatelyAndOnlyTheOutsideTapClosesManually() {
+    fun fastClosesImmediatelyAndAPlainMapOrOutsideTapClosesManually() {
         val fast = MotionState.FAST
         val stopped = MotionState.STOPPED
         val opened = closed.tap(HudTarget.MAP, 0, stopped)
         assertEquals(closed, opened.advance(1, fast))
         assertEquals(closed, closed.tap(HudTarget.MAP, 1, fast))
-        assertEquals(opened, opened.tap(HudTarget.BIGMAP, 1, stopped))
+        assertEquals(closed, opened.tap(HudTarget.BIGMAP, 1, stopped))
         assertEquals(closed, opened.tap(HudTarget.OUTSIDE, 1, stopped))
     }
 

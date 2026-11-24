@@ -271,8 +271,10 @@ class NavigationHudTest {
         tap("map")
         val large = compose.onNodeWithTag("bigmap")
         large.performTouchInput { click(center + Offset(21f, -17f)) }
-        large.assertIsDisplayed()
+        // A plain tap closes the map instead of choosing a destination.
+        large.assertDoesNotExist()
         assertEquals(null, f.requestedDestination)
+        tap("map")
         large.performTouchInput { down(center + Offset(21f, -17f)) }
         compose.mainClock.advanceTimeBy(850L)
         text("経路を取得中…").assertIsDisplayed()
