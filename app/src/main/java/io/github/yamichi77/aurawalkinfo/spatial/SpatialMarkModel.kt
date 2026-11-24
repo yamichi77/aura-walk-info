@@ -15,7 +15,6 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
-import kotlin.math.tan
 
 internal data class MarkVector(val x: Double, val y: Double, val z: Double) {
     operator fun plus(other: MarkVector) = MarkVector(x + other.x, y + other.y, z + other.z)
@@ -62,7 +61,7 @@ private fun directionInPerception(bearing: Double, northOffset: Double): MarkVec
 
 internal enum class MarkKind(val baseHeight: Double) {
     TURN(GpsSpatialProjector.EYE_HEIGHT_METERS + 0.6),
-    DESTINATION(8.0),
+    DESTINATION(0.0),
     SIGNAL(SIGNAL_HEIGHT_METERS),
 }
 
@@ -163,13 +162,13 @@ internal fun spatialUpdateIntervalMillis(mode: SpatialUpdateMode, fading: Boolea
     else -> null
 }
 
-internal class SmoothedMarkPosition(initial: MarkVector) {
+internal class SmoothedMarkPosition(initial: MarkVector, private val minimumChangeMeters: Double = 1.0) {
     private var from = initial
     private var target = initial
     private var startedAt = 0L
 
     fun retarget(position: MarkVector, now: Long, sourceChanged: Boolean = false) {
-        if (!sourceChanged && (position - target).length() < 1.0) return
+        if (!sourceChanged && (position - target).length() < minimumChangeMeters) return
         from = at(now)
         target = position
         startedAt = now
@@ -209,26 +208,11 @@ internal class MarkFade(private val maxOpacity: Float = MARK_MAX_OPACITY) {
 
 internal const val MIN_MARK_ELEVATION_DEGREES = 5.0
 
-internal fun MarkView.forKind(kind: MarkKind) =
-    if (kind == MarkKind.TURN) copy(minimumElevationDegrees = 0.0) else this
-
-internal data class MarkView(
-    val eye: MarkVector,
-    val up: MarkVector,
-    val minimumElevationDegrees: Double = MIN_MARK_ELEVATION_DEGREES,
-) {
-    private val minimumElevationSlope = tan(Math.toRadians(minimumElevationDegrees))
-    private fun horizontal(delta: MarkVector, rise: Double) = sqrt((delta.dot(delta) - rise * rise).coerceAtLeast(0.0))
-
+internal data class MarkView(val eye: MarkVector, val up: MarkVector) {
     fun elevation(point: MarkVector): Double {
         val delta = point - eye
         val rise = delta.dot(up)
-        return Math.toDegrees(atan2(rise, horizontal(delta, rise)))
-    }
-
-    fun margin(point: MarkVector): Double {
-        val delta = point - eye
-        val rise = delta.dot(up)
-        return rise - horizontal(delta, rise) * minimumElevationSlope
+        val horizontal = sqrt((delta.dot(delta) - rise * rise).coerceAtLeast(0.0))
+        return Math.toDegrees(atan2(rise, horizontal))
     }
 }

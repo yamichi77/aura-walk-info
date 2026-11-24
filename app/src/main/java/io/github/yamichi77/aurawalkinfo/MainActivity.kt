@@ -137,6 +137,7 @@ class MainActivity : ComponentActivity() {
         }
         val markPreview = mode == "markpreview"
         val markPreviewTurnMeters = intent.getFloatExtra("distance", 20f).coerceIn(3f, 140f).toDouble()
+        val markPreviewDirection = if (markPreview) intent.getStringExtra("turn") else null
         val headingSpeech = mode == "heading" || mode == "speech"
         val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" ||
             headingSpeech || spatialTest
@@ -246,7 +247,9 @@ class MainActivity : ComponentActivity() {
                     // Debug only: a fixed route ahead of the fake fix, to look at the spatial arrow and pin.
                     val previewNav = remember(displayedState.mapCenter) {
                         displayedState.mapCenter?.takeIf { markPreview }?.let { center ->
-                            markPreviewNav(NavPoint(center.latitude, center.longitude), markPreviewTurnMeters)
+                            markPreviewNav(
+                                NavPoint(center.latitude, center.longitude), markPreviewTurnMeters, markPreviewDirection,
+                            )
                         }
                     }
                     val navState = previewNav ?: repositoryNav
