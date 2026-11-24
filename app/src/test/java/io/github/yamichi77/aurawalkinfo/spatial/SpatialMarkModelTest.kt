@@ -1,5 +1,10 @@
 package io.github.yamichi77.aurawalkinfo.spatial
 
+import androidx.xr.runtime.math.Vector3
+import io.github.yamichi77.aurawalkinfo.heading.HeadPose
+import io.github.yamichi77.aurawalkinfo.heading.HeadTracking
+import io.github.yamichi77.aurawalkinfo.heading.HeadingFix
+import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.heading.NorthEstimate
 import io.github.yamichi77.aurawalkinfo.nav.GuidanceCalculator
 import io.github.yamichi77.aurawalkinfo.nav.NavDestination
@@ -45,6 +50,28 @@ class SpatialMarkModelTest {
         }
         assertVector(eye + east * -25.0 + up, GpsSpatialProjector.project(fix.copy(northOffsetDegrees = 90.0), geo(north = 25.0), 7.0))
         assertVector(eye + MarkVector.UP * -1.6, GpsSpatialProjector.project(fix, origin, 0.0))
+    }
+
+    @Test fun gpsUpdateMovesTheMarkWithTheSameTrackedEyePosition() {
+        val target = geo(north = 40.0)
+        val tracking = HeadingTracking()
+        val stationaryEye = Vector3(5f, 2f, 3f)
+        fun project(point: NavPoint, fixTime: Long): MarkVector {
+            // The GPS callback arrives 600 ms after the fix, with the same tracked eye position.
+            for (time in fixTime..fixTime + 600 step 100) {
+                tracking.onPose(HeadPose(time, HeadTracking.TRACKING, perceptionPosition = stationaryEye))
+            }
+            tracking.onFix(HeadingFix(fixTime, 0.0, 8.0, 1.4), walking = true)
+            val referenceEye = checkNotNull(tracking.poseForFix(fixTime)?.perceptionPosition)
+            val trackedEye = MarkVector(referenceEye.x.toDouble(), referenceEye.y.toDouble(), referenceEye.z.toDouble())
+            return GpsSpatialProjector.project(SpatialFix(point, trackedEye, 0.0), target, 7.0)
+        }
+        val initial = project(origin, 0)
+        val updated = project(geo(north = 10.0), 900)
+        val position = SmoothedMarkPosition(initial)
+        position.retarget(updated, 500)
+        assertVector(initial, position.at(500))
+        assertVector(initial - north * 10.0, position.at(1_500))
     }
 
     @Test fun projectionCrossesTheDateLineLocally() {

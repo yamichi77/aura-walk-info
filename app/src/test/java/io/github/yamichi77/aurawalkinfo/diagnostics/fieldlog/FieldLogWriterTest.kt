@@ -57,13 +57,13 @@ class FieldLogWriterTest {
         val base = SessionMetrics(1, MotionState.WALKING, 1.0, 4f, 0.0, null, 0.0, 0, 10f)
         val tracked = base.copy(
             headPose = HeadPose(990, HeadTracking.TRACKING, -0.25, 1.23456, -18.0),
-            headingFix = HeadingFix(950, 37.0, 9.25, 1.2, 4.0),
+            headingFix = HeadingFix(950, 37.0, 9.25, 1.2),
             north = NorthEstimate(38.0, 5.1),
         )
         val paused = base.copy(
             elapsedSeconds = 2,
             headPose = HeadPose(1_990, HeadTracking.PAUSED),
-            headingFix = HeadingFix(1_950, 40.0, null, null, 4.0),
+            headingFix = HeadingFix(1_950, 40.0, null, null),
         )
         FieldLogWriter(temp.root).write(FieldLogProvider.GPS, flowOf(tracked, paused))
         val lines = temp.root.listFiles()!!.single().readLines()

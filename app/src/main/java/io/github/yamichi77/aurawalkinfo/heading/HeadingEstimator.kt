@@ -1,5 +1,6 @@
 package io.github.yamichi77.aurawalkinfo.heading
 
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -23,10 +24,9 @@ internal data class HeadingFix(
     val bearingDegrees: Double?,
     val bearingAccuracyDegrees: Double?,
     val speedMps: Double?,
-    val accuracyMeters: Double,
 )
 
-// T4 initial convention. Verify the axes and yaw sign on the glasses at acceptance.
+// The clockwise yaw sign agreed with the T29 outdoor field log.
 internal object HeadingAxes {
     const val FORWARD_Z = -1
     const val RIGHT_X = 1
@@ -43,136 +43,113 @@ internal data class NorthEstimate(val offsetDegrees: Double, val uncertaintyDegr
 
 /** GPS and pose times use the same monotonic clock. Call from a single dispatcher. */
 internal class HeadingEstimator {
-    private val poses = ArrayDeque<HeadPose>()
-    private val fixes = ArrayDeque<HeadingFix>()
-    private val offsets = ArrayDeque<Pair<Long, Double>>()
-    private var windowStart: Long? = null
-    private var lastPoseTime: Long? = null
+    private data class TimedAngle(val timeMillis: Long, val degrees: Double)
 
-    fun onFix(fix: HeadingFix) {
-        val poseTime = lastPoseTime ?: return
-        if (fix.timeMillis < poses.first().timeMillis ||
-            fix.timeMillis < (windowStart ?: fix.timeMillis) ||
-            fix.timeMillis - poseTime > MAX_POSE_GAP_MS ||
-            fixes.lastOrNull()?.let { fix.timeMillis <= it.timeMillis } == true
+    private val poses = ArrayDeque<HeadPose>()
+    private val bearings = ArrayDeque<TimedAngle>()
+    private val offsets = ArrayDeque<TimedAngle>()
+    private var north: NorthEstimate? = null
+
+    fun onFix(fix: HeadingFix, walking: Boolean) {
+        val time = fix.timeMillis
+        val pose = trackedPoseNear(time) ?: return
+
+        val bearing = fix.bearingDegrees
+        val speed = fix.speedMps
+        val accuracy = fix.bearingAccuracyDegrees
+        if (!walking || bearing == null || !bearing.isFinite() ||
+            speed == null || !speed.isFinite() || speed < 1.0 ||
+            (accuracy != null && accuracy !in 0.0..30.0)
+        ) {
+            bearings.clear()
+            return
+        }
+        if (bearings.lastOrNull()?.let { time <= it.timeMillis } == true) return
+        bearings.addLast(TimedAngle(time, bearing))
+        while (time - bearings.first().timeMillis > BEARING_WINDOW_MS) bearings.removeFirst()
+        if (accuracy == null &&
+            (bearings.size < 3 || circularStats(bearings.map { it.degrees }).deviation > 15.0)
         ) return
-        if (windowStart == null) windowStart = fix.timeMillis
-        fixes.addLast(fix)
+        if (offsets.lastOrNull()?.let { time - it.timeMillis < SAMPLE_INTERVAL_MS } == true) return
+
+        val yaw = pose.yawDegrees ?: return
+        if (!yaw.isFinite()) return
+        val offset = normalizeDegrees(bearing - HeadingAxes.YAW_TO_CLOCKWISE * yaw)
+        offsets.addLast(TimedAngle(time, offset))
+        if (offsets.size > RECENT_SAMPLES) offsets.removeFirst()
+        updateNorth()
     }
 
     fun onPose(pose: HeadPose) {
-        val previous = lastPoseTime
+        val previous = poses.lastOrNull()?.timeMillis
         if (previous != null && pose.timeMillis < previous) return
-        if (pose.tracking != HeadTracking.TRACKING ||
-            pose.xMeters?.isFinite() != true || pose.zMeters?.isFinite() != true
-        ) {
+        if (pose.tracking != HeadTracking.TRACKING) {
             reset()
             return
         }
         if (previous != null && pose.timeMillis - previous > MAX_POSE_GAP_MS) reset()
-        lastPoseTime = pose.timeMillis
         poses.addLast(pose)
-        val start = windowStart
-        if (start == null) {
-            while (pose.timeMillis - poses.first().timeMillis > FIX_GRACE_MS + MAX_POSE_GAP_MS) {
-                poses.removeFirst()
-            }
-            return
-        }
-        val end = start + WINDOW_MS
-        if (pose.timeMillis < end + FIX_GRACE_MS) return
+        // GPS callbacks can arrive after the corresponding head sample.
+        while (pose.timeMillis - poses.first().timeMillis > POSE_HISTORY_MS) poses.removeFirst()
+    }
 
-        val points = poses.filter { it.timeMillis in start..end }
-        val observations = fixes.filter { it.timeMillis in start..end }
-        windowOffset(start, end, points, observations)?.let { offset ->
-            offsets.addLast(end to offset)
-            if (offsets.size > RECENT_WINDOWS) offsets.removeFirst()
-        }
-        windowStart = end
-        while (poses.first().timeMillis < end) poses.removeFirst()
-        while (fixes.firstOrNull()?.let { it.timeMillis < end } == true) fixes.removeFirst()
+    fun trackedPoseNear(timeMillis: Long): HeadPose? {
+        val first = poses.firstOrNull() ?: return null
+        if (timeMillis < first.timeMillis) return null
+        return poses.minBy { abs(timeMillis - it.timeMillis) }
+            .takeIf { abs(timeMillis - it.timeMillis) <= MAX_POSE_GAP_MS }
     }
 
     fun estimate(nowMillis: Long): NorthEstimate? {
-        val lastPose = lastPoseTime ?: return null
-        if (nowMillis - lastPose > MAX_POSE_GAP_MS || offsets.isEmpty()) return null
-        val values = offsets.map { it.second }
-        val median = values.minBy { candidate -> values.sumOf { angularDistance(candidate, it) } }
-        val retained = offsets.filter { angularDistance(median, it.second) < 20.0 }
-        val angles = retained.map { it.second }
-        // A single window cannot measure scatter. Budget the allowed GPS bearing error per window.
-        val uncertainty = (hypot(circularDeviation(angles), MAX_BEARING_ERROR_DEG) /
-            sqrt(angles.size.toDouble())).coerceAtLeast(5.0)
-        val ageMinutes = (nowMillis - retained.last().first).coerceAtLeast(0) / 60_000.0
-        return NorthEstimate(circularMean(angles), uncertainty + ageMinutes)
+        val lastPose = poses.lastOrNull() ?: return null
+        if (nowMillis - lastPose.timeMillis > MAX_POSE_GAP_MS) return null
+        val estimate = north ?: return null
+        val ageMinutes = (nowMillis - offsets.last().timeMillis).coerceAtLeast(0) / 60_000.0
+        return estimate.copy(uncertaintyDegrees = estimate.uncertaintyDegrees + ageMinutes)
     }
 
     fun reset() {
         poses.clear()
-        fixes.clear()
+        bearings.clear()
         offsets.clear()
-        windowStart = null
-        lastPoseTime = null
+        north = null
     }
 
-    private fun windowOffset(
-        start: Long,
-        end: Long,
-        points: List<HeadPose>,
-        observations: List<HeadingFix>,
-    ): Double? {
-        if (points.size < 2 || observations.size < 3 ||
-            points.first().timeMillis - start > MAX_POSE_GAP_MS ||
-            end - points.last().timeMillis > MAX_POSE_GAP_MS ||
-            observations.first().timeMillis - start > MAX_FIX_EDGE_MS ||
-            end - observations.last().timeMillis > MAX_FIX_EDGE_MS ||
-            observations.zipWithNext().any { (a, b) -> b.timeMillis - a.timeMillis > MAX_FIX_GAP_MS }
-        ) return null
-        if (observations.any {
-                it.bearingDegrees?.isFinite() != true || it.speedMps?.let { speed -> speed.isFinite() && speed >= 0.8 } != true ||
-                    it.accuracyMeters !in 0.0..30.0 ||
-                    it.bearingAccuracyDegrees?.let { accuracy -> accuracy !in 0.0..MAX_BEARING_ERROR_DEG } == true
-            }
-        ) return null
-        val bearings = observations.map { requireNotNull(it.bearingDegrees) }
-        if (circularDeviation(bearings) > 10.0) return null
-
-        val dx = points.last().xMeters!! - points.first().xMeters!!
-        val dz = points.last().zMeters!! - points.first().zMeters!!
-        val displacement = hypot(dx, dz)
-        if (displacement < 3.0) return null
-        val path = points.zipWithNext().sumOf { (a, b) ->
-            hypot(b.xMeters!! - a.xMeters!!, b.zMeters!! - a.zMeters!!)
-        }
-        if (displacement / path < 0.9) return null
-        return normalizeDegrees(circularMean(bearings) - HeadingAxes.travelBearing(dx, dz))
+    private fun updateNorth() {
+        north = null
+        if (offsets.size < MIN_SAMPLES) return
+        val mean = circularStats(offsets.map { it.degrees }).mean
+        val retained = offsets.filter { angularDistance(mean, it.degrees) <= 30.0 }
+        if (retained.size < MIN_SAMPLES) return
+        val (offset, deviation) = circularStats(retained.map { it.degrees })
+        // Consecutive samples are correlated, so use an effective sample size of one fifth.
+        val uncertainty = (deviation / sqrt(retained.size / 5.0)).coerceAtLeast(8.0)
+        north = NorthEstimate(offset, uncertainty)
     }
 
     companion object {
         const val MAX_POSE_GAP_MS = 350L
-        private const val WINDOW_MS = 5_000L
-        private const val FIX_GRACE_MS = 1_000L
-        private const val MAX_FIX_EDGE_MS = 1_500L
-        private const val MAX_FIX_GAP_MS = 2_000L
-        private const val RECENT_WINDOWS = 20
-        private const val MAX_BEARING_ERROR_DEG = 20.0
+        private const val POSE_HISTORY_MS = 1_350L
+        private const val BEARING_WINDOW_MS = 3_000L
+        private const val SAMPLE_INTERVAL_MS = 1_000L
+        private const val MIN_SAMPLES = 20
+        private const val RECENT_SAMPLES = 120
     }
 }
 
 internal fun normalizeDegrees(angle: Double): Double = ((angle % 360.0) + 360.0) % 360.0
 
 private fun angularDistance(a: Double, b: Double): Double =
-    kotlin.math.abs(normalizeDegrees(a - b + 180.0) - 180.0)
+    abs(normalizeDegrees(a - b + 180.0) - 180.0)
 
-private fun circularMean(angles: List<Double>): Double {
+private data class CircularStats(val mean: Double, val deviation: Double)
+
+private fun circularStats(angles: List<Double>): CircularStats {
     val x = angles.sumOf { cos(Math.toRadians(it)) }
     val y = angles.sumOf { sin(Math.toRadians(it)) }
-    return normalizeDegrees(Math.toDegrees(atan2(y, x)))
-}
-
-private fun circularDeviation(angles: List<Double>): Double {
-    val x = angles.sumOf { cos(Math.toRadians(it)) }
-    val y = angles.sumOf { sin(Math.toRadians(it)) }
-    val length = (hypot(x, y) / angles.size).coerceIn(0.0, 1.0)
-    return Math.toDegrees(sqrt(-2.0 * ln(length)))
+    val length = (hypot(x, y) / angles.size).coerceIn(1e-15, 1.0)
+    return CircularStats(
+        normalizeDegrees(Math.toDegrees(atan2(y, x))),
+        Math.toDegrees(sqrt(-2.0 * ln(length))),
+    )
 }
