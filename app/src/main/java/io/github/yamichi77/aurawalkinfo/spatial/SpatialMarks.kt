@@ -9,7 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -41,9 +40,6 @@ import kotlinx.coroutines.launch
 
 internal const val SCENE_UNDERSTANDING_COARSE = "android.permission.SCENE_UNDERSTANDING_COARSE"
 private const val TAG = "AuraSpatial"
-private val MarkColors = Color(0xFF7FDBFF).let { color ->
-    listOf(color, color.copy(alpha = 0.20f), color.copy(alpha = 0.08f))
-}
 
 @Composable
 internal fun SpatialMarks(
@@ -223,11 +219,10 @@ private class SpatialMarkScene(
         }
         val fromPerception = anchorPose()?.inverse ?: return MarkReason.ANCHOR_UNAVAILABLE
         if (!prepared) {
-            // All suspending XR resource creation finishes before any mark can be visible.
             val parent = checkNotNull(anchorSpace)
             marks.forEach { it.prepare(session, context, parent) }
             prepared = true
-            // Read the safety inputs again after the suspension before placing anything.
+            // Recheck safety inputs on the next tick after creating the anchor.
             return MarkReason.ANCHOR_UNAVAILABLE
         }
         val vpsPositions = vps?.let { fix ->
@@ -248,12 +243,13 @@ private class SpatialMarkScene(
         lastVpsProjection = usingVps.takeIf { vps != null }
         if (!usingVps && fallbackReason != null) return fallbackReason
         val northOffset = if (usingVps) checkNotNull(vps).north.offsetDegrees else checkNotNull(gpsFix).northOffsetDegrees
+        val view = fromPerception.markView(eye)
         marks.zip(decisions).forEachIndexed { index, (mark, decision) ->
             val target = decision.target ?: return@forEachIndexed
             val world = vpsPositions?.get(index) ?: GpsSpatialProjector.project(gpsFix, target.point, mark.kind.baseHeight)
             val center = fromPerception.transformPoint(world.vector3()).markVector()
             val forward = fromPerception.transformVector(markForward(target, northOffset).vector3()).markVector()
-            mark.position(target, center, forward, usingVps, now)
+            mark.position(target, center, forward, usingVps, now, view)
         }
         return null
     }
@@ -276,12 +272,7 @@ private class SpatialMarkScene(
     }
 
     fun draw(reason: MarkReason?, decisions: List<MarkDecision>?, eye: Vector3?, current: NavPoint?, now: Long) {
-        val view = if (eye == null) null else anchorPose()?.inverse?.let { fromPerception ->
-            MarkView(
-                fromPerception.transformPoint(eye).markVector(),
-                fromPerception.transformVector(Vector3(0f, 1f, 0f)).markVector(),
-            )
-        }
+        val view = if (eye == null) null else anchorPose()?.inverse?.markView(eye)
         for ((index, mark) in marks.withIndex()) {
             val decision = decisions?.get(index)
             val why = reason ?: decision?.reason ?: MarkReason.NO_FIX
@@ -303,17 +294,18 @@ private class SpatialMarkScene(
 }
 
 private class SceneMark(val kind: MarkKind) {
-    private var mesh: SpatialMarkMesh? = null
+    private var standingPanel: StandingMarkPanel? = null
     private var signalPanel: SignalTotemPanel? = null
     private var lastShownSignal: SignalTotem? = null
     private var target: MarkTarget? = null
     private var position: SmoothedMarkPosition? = null
+    private var destinationGround: MarkVector? = null
     private var forward = MarkVector(0.0, 0.0, -1.0)
     private val maxOpacity = if (kind == MarkKind.SIGNAL) MARK_MAX_OPACITY else 1f
     private var fade = MarkFade(maxOpacity)
     private var lastReason: MarkReason? = null
     private var lastView: MarkView? = null
-    private var lastClip: ClippedMark? = null
+    private var lastFacing: MarkVector? = null
     private var nearTurn = false
     var opacity = 0f
         private set
@@ -321,23 +313,28 @@ private class SceneMark(val kind: MarkKind) {
 
     fun centerAt(now: Long): MarkVector? = position?.at(now)
 
-    suspend fun prepare(session: Session, context: Context, parent: AnchorSpace) {
+    fun prepare(session: Session, context: Context, parent: AnchorSpace) {
         if (kind == MarkKind.SIGNAL) {
-            if (signalPanel == null) signalPanel = SignalTotemPanel(session, context, parent)
-            return
+            signalPanel = SignalTotemPanel(session, context, parent)
+        } else {
+            standingPanel = StandingMarkPanel(session, context, parent, kind)
         }
-        val renderer = mesh ?: SpatialMarkMesh(markDotVertexCapacities(kind)).also { mesh = it }
-        renderer.initialize(session, parent)
     }
 
     private var usingVps = false
 
-    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, usingVps: Boolean, now: Long) {
+    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, usingVps: Boolean, now: Long, view: MarkView) {
+        val next = if (kind == MarkKind.DESTINATION) {
+            destinationGround = center
+            destinationHeadTarget(center, view)
+        } else center
         if (!sameMark(this.target, target)) {
-            position = SmoothedMarkPosition(center)
+            // The destination height changes by much less than a metre between normal walking updates.
+            position = if (kind == MarkKind.DESTINATION) SmoothedMarkPosition(next, minimumChangeMeters = 0.05)
+                else SmoothedMarkPosition(next)
             fade = MarkFade(maxOpacity)
         } else {
-            position?.retarget(center, now, sourceChanged = this.usingVps != usingVps)
+            position?.retarget(next, now, sourceChanged = this.usingVps != usingVps)
         }
         this.usingVps = usingVps
         this.target = target
@@ -356,40 +353,50 @@ private class SceneMark(val kind: MarkKind) {
             }
             return
         }
-        val markView = view?.forKind(kind)
-        val usableView = markView ?: lastView
-        if (markView != null) lastView = markView
+        val usableView = view ?: lastView
+        if (view != null) lastView = view
         if (kind == MarkKind.TURN && stored != null && current != null) {
             nearTurn = isNearTurn(current.distanceTo(stored.point))
         }
-        val clipped = if (reason == MarkReason.FAST || center == null || stored == null || usableView == null) null
-            else if (reason == MarkReason.SHOW || opacity > 0f || reason != lastReason) {
-                val dots = markDots(kind, center, forward, usableView, now, nearTurn)
-                ClippedMark(dotTriangles(dots, usableView), dots, center, usableView).also { lastClip = it }
-            } else null
+        val layout = if (reason != MarkReason.FAST && center != null && usableView != null &&
+            (reason == MarkReason.SHOW || opacity > 0f)
+        ) {
+            val facing = markPanelFacing(center, usableView, lastFacing ?: forward * -1.0)
+            lastFacing = facing
+            if (kind == MarkKind.TURN) standingArrow(center, usableView, facing, forward, nearTurn)
+            else destinationGround?.let { standingDestination(center, it, usableView, facing) }
+        } else null
 
         val actual = when {
             reason != MarkReason.SHOW -> reason
-            !compatible || view == null -> MarkReason.ANCHOR_UNAVAILABLE
-            clipped == null || clipped.geometry.all { it.isEmpty() } -> MarkReason.BELOW_ELEVATION
+            !compatible || view == null || center == null || standingPanel == null -> MarkReason.ANCHOR_UNAVAILABLE
+            layout == null -> MarkReason.BELOW_ELEVATION
             else -> MarkReason.SHOW
         }
         opacity = fade.update(actual == MarkReason.SHOW, reason == MarkReason.FAST, now) * arrowOpacity(nearTurn)
-        mesh?.draw(clipped?.geometry.orEmpty(), MarkColors, opacity)
+        if (layout != null && usableView != null) standingPanel?.draw(layout, usableView.up, opacity)
+        else standingPanel?.hide()
         if (debug && actual != lastReason) {
-            val data = clipped ?: lastClip
-            val range = data?.elevationRange()
+            val distance = if (center != null && usableView != null) (center - usableView.eye).length() else null
+            val elevation = if (layout != null && usableView != null) {
+                val data = layout.artwork
+                val clippedHeight = if (data is MarkArtwork.Destination) data.height - data.visibleHeight else 0.0
+                val right = usableView.up.cross(layout.facing)
+                val lowerEdge = layout.bottom + usableView.up * clippedHeight + right * (data.width / (2 * right.length()))
+                val top = layout.bottom + usableView.up * data.height
+                "${usableView.elevation(lowerEdge).diagnostic()}..${usableView.elevation(top).diagnostic()}"
+            } else "-..-"
             Log.i(
                 TAG, "${if (actual == MarkReason.SHOW) "SHOW" else "HIDE"} mark=$kind reason=$actual " +
-                    "distanceM=${data?.distance?.diagnostic() ?: "-"} " +
-                    "elevationDeg=${range?.first?.diagnostic() ?: "-"}..${range?.second?.diagnostic() ?: "-"}",
+                    "distanceM=${distance?.diagnostic() ?: "-"} elevationDeg=$elevation",
             )
         }
         lastReason = actual
         if (reason == MarkReason.FAST) {
             target = null
             position = null
-            lastClip = null
+            destinationGround = null
+            lastFacing = null
         }
     }
 
@@ -430,7 +437,7 @@ private class SceneMark(val kind: MarkKind) {
     }
 
     fun hide() {
-        mesh?.hide()
+        standingPanel?.hide()
         signalPanel?.hide()
         resetVisibility()
     }
@@ -438,34 +445,22 @@ private class SceneMark(val kind: MarkKind) {
     private fun resetVisibility() {
         fade = MarkFade(maxOpacity)
         lastView = null
-        lastClip = null
+        lastFacing = null
         lastReason = null
         lastShownSignal = null
         opacity = 0f
     }
 
     fun removeFromScene() {
-        mesh?.removeFromScene()
-        mesh = null
+        standingPanel?.removeFromScene()
+        standingPanel = null
         signalPanel?.removeFromScene()
         signalPanel = null
         target = null
         position = null
+        destinationGround = null
         nearTurn = false
         resetVisibility()
-    }
-}
-
-private class ClippedMark(
-    val geometry: List<List<MarkVector>>, private val dots: List<MarkVector>,
-    private val center: MarkVector, private val view: MarkView,
-) {
-    val distance get() = (center - view.eye).length()
-
-    fun elevationRange(): Pair<Double, Double>? {
-        val points = geometry.flatten().ifEmpty { dots }
-        if (points.isEmpty()) return null
-        return points.minOf(view::elevation) to points.maxOf(view::elevation)
     }
 }
 
@@ -478,4 +473,6 @@ private fun sameMark(first: MarkTarget?, second: MarkTarget?): Boolean {
 
 private fun MarkVector.vector3() = Vector3(x.toFloat(), y.toFloat(), z.toFloat())
 private fun Vector3.markVector() = MarkVector(x.toDouble(), y.toDouble(), z.toDouble())
+private fun Pose.markView(eye: Vector3) =
+    MarkView(transformPoint(eye).markVector(), transformVector(Vector3(0f, 1f, 0f)).markVector())
 private fun Double.diagnostic() = String.format(Locale.ROOT, "%.2f", this)

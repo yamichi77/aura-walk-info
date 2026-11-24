@@ -1,6 +1,8 @@
 package io.github.yamichi77.aurawalkinfo.spatial
 
+import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
+import io.github.yamichi77.aurawalkinfo.diagnostics.markPreviewNav
 import io.github.yamichi77.aurawalkinfo.heading.HeadPose
 import io.github.yamichi77.aurawalkinfo.heading.HeadTracking
 import io.github.yamichi77.aurawalkinfo.heading.HeadingFix
@@ -12,6 +14,8 @@ import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavRoute
 import io.github.yamichi77.aurawalkinfo.nav.NavState
 import io.github.yamichi77.aurawalkinfo.nav.NavStep
+import io.github.yamichi77.aurawalkinfo.nav.bearingTo
+import io.github.yamichi77.aurawalkinfo.nav.distanceTo
 import io.github.yamichi77.aurawalkinfo.pics.PicsFreshness
 import io.github.yamichi77.aurawalkinfo.pics.PicsAspect
 import io.github.yamichi77.aurawalkinfo.pics.PicsLight
@@ -21,10 +25,9 @@ import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.time.Duration
-import kotlin.math.acos
 import kotlin.math.atan
 import kotlin.math.cos
-import kotlin.math.tan
+import kotlin.math.sin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -100,77 +103,152 @@ class SpatialMarkModelTest {
         assertVector(east * 3.0, position.at(2_750))
     }
 
-    @Test fun arrowAndPillarClipActualDotVerticesAtTheirElevationLimits() {
-        val baseView = MarkView(zero, MarkVector.UP)
-        for ((kind, limit) in listOf(MarkKind.TURN to 0.0, MarkKind.DESTINATION to 5.0)) {
-            val view = baseView.forKind(kind)
-            val boundary = MarkVector(0.0, 20 * tan(Math.toRadians(limit)), -20.0)
-            val layers = dotTriangles(listOf(boundary), view)
-            val points = layers.flatten()
-            assertTrue(layers.all { it.isNotEmpty() })
-            assertTrue(points.all { view.elevation(it) > limit })
-            assertTrue(points.any { view.elevation(it) < limit + 0.01 })
-            assertTrue(dotTriangles(listOf(boundary - MarkVector.UP), view).all { it.isEmpty() })
+    @Test fun arrowBendsFromTheViewersBearingToTheCorner() {
+        val up = MarkVector.UP
+        val cases = mapOf(
+            0.0 to 0.0, 19.9 to 0.0, -19.9 to 0.0, 20.1 to 20.1,
+            45.0 to 45.0, 90.0 to 90.0, -90.0 to -90.0, 149.9 to 149.9,
+            150.1 to 180.0, -150.1 to -180.0,
+        )
+        val viewerBearing = 75.0
+        for ((relative, expected) in cases) {
+            assertEquals(expected, turnBendDegrees(direction(viewerBearing), direction(viewerBearing + relative), up), 1e-9)
         }
-        val low = MarkVector(0.0, 0.6, -20.0)
-        assertTrue(dotTriangles(listOf(low), baseView.forKind(MarkKind.TURN)).first().isNotEmpty())
-        assertTrue(dotTriangles(listOf(low), baseView.forKind(MarkKind.DESTINATION)).all { it.isEmpty() })
+
+        val view = MarkView(zero, up)
+        fun arrow(relative: Double) =
+            standingArrow(north * 20.0, view, north * -1.0, direction(relative), false).artwork as MarkArtwork.Arrow
+        val right = arrow(90.0)
+        val left = arrow(-90.0)
+        assertTrue(right.shaft.last().x > right.shaft.first().x)
+        assertTrue(left.shaft.last().x < left.shaft.first().x)
+        assertEquals(right.shaft[1].y, right.shaft.last().y, 1e-9)
+        assertTrue(arrow(45.0).shaft.last().y < arrow(45.0).shaft[1].y)
+        assertEquals(2, arrow(0.0).shaft.size)
+        val uturn = arrow(175.0)
+        assertTrue(uturn.shaft.last().y > uturn.shaft[2].y)
+        assertTrue(uturn.head[1].y > uturn.head[0].y && uturn.head[1].y > uturn.head[2].y)
     }
 
-    @Test fun nearArrowCapsItsRenderedAngleAndOpacityIncludingGlow() {
+    @Test fun panelFacesTheEyeWithNoPitchOrRollEvenInARotatedAnchor() {
+        val up = MarkVector(0.0, 0.8, 0.6)
+        val base = MarkVector(1.0, 0.0, 3.0)
+        val offset = east * 4.0 + MarkVector(0.0, -0.6, 0.8) * 3.0
+        val view = MarkView(base + offset + up * 1.5, up)
+        val facing = markPanelFacing(base, view, north)
+        assertVector(offset, facing)
+        val rotation = Pose(rotation = signalPanelRotation(facing, up))
+        val front = rotation.transformVector(Vector3(0f, 0f, 1f))
+        val vertical = rotation.transformVector(Vector3(0f, 1f, 0f))
+        assertVector(offset * 0.2, MarkVector(front.x.toDouble(), front.y.toDouble(), front.z.toDouble()))
+        assertVector(up, MarkVector(vertical.x.toDouble(), vertical.y.toDouble(), vertical.z.toDouble()))
+        assertVector(facing, markPanelFacing(base, MarkView(base + up, up), facing))
+    }
+
+    @Test fun arrowKeepsItsAngularWidthStrokeAndClearanceAtNearAndFarDistances() {
         assertFalse(isNearTurn(10.001))
-        assertEquals(1f, arrowOpacity(isNearTurn(10.001)), 0f)
-        for (distance in listOf(0.0, 0.1, 1.0, 5.0, 10.0)) {
+        assertEquals(1f, arrowOpacity(false), 0f)
+        val up = MarkVector.UP
+        val view = MarkView(eye + up * 0.8, up)
+        for (distance in listOf(0.0, 0.1, 1.0, 5.0, 10.0, 20.0, 150.0)) {
             val near = isNearTurn(distance)
-            assertTrue(near)
-            assertEquals(0.5f, arrowOpacity(near), 0f)
-            val center = MarkVector.UP * 0.6 + north * distance
-            val view = MarkView(zero, MarkVector.UP).forKind(MarkKind.TURN)
-            for (direction in listOf(north, east, north * -1.0)) {
-                val points = dotTriangles(markDots(MarkKind.TURN, center, direction, view, 500, near), view).flatten()
-                assertTrue(points.isNotEmpty())
-                assertTrue(points.all { point ->
-                    val cosine = point.dot(center) / (point.length() * center.length())
-                    Math.toDegrees(acos(cosine.coerceIn(-1.0, 1.0))) <= MAX_NEAR_ARROW_ANGLE_DEGREES / 2
-                })
+            assertEquals(distance <= 10.0, near)
+            if (near) assertEquals(0.5f, arrowOpacity(near), 0f)
+            val base = eye + north * distance + up * 0.6
+            for (relative in -180..180 step 5) {
+                val mark = standingArrow(base, view, north * -1.0, direction(relative.toDouble()), near)
+                val arrow = mark.artwork as MarkArtwork.Arrow
+                assertEquals(0.6, (mark.bottom - view.eye).dot(up), 1e-9)
+                assertEquals(0.0, (mark.bottom - base).dot(north), 1e-9)
+                val topDistance = (mark.bottom + up * arrow.height - view.eye).length()
+                val inkWidth = arrow.width - (2 * STROKE_PADDING - 1) * arrow.stroke
+                assertTrue(angle(inkWidth, topDistance) >= 5.0 - 1e-9)
+                assertTrue(angle(arrow.stroke, topDistance) >= 0.4 - 1e-9)
+                if (near) assertTrue(angle(arrow.width, (mark.bottom - view.eye).length()) <= 8.0 + 1e-9)
             }
         }
     }
 
-    @Test fun dotsAndArrowOutlineKeepTheirAngularMinimumsAcrossDistances() {
-        fun angle(size: Double, distance: Double) = Math.toDegrees(2.0 * atan(size / (2.0 * distance)))
-        for (distance in listOf(10.0, 40.0, 100.0, 150.0)) {
-            val diameterAcrossFlats = 2 * dotRadius(distance) * cos(Math.PI / 6)
-            assertEquals(MIN_DOT_ANGLE_DEGREES, angle(diameterAcrossFlats, distance), 1e-9)
-
-            val scale = arrowScale(distance, isNearTurn(distance))
-            assertTrue(angle(2 * scale, distance + 1.25 * scale) >= MIN_ARROW_ANGLE_DEGREES - 1e-9)
+    @Test fun destinationHeadIsTenDegreesUpAtFiveTwentyAndOneHundredFiftyMeters() {
+        val up = MarkVector.UP
+        val view = MarkView(zero, up)
+        for ((distance, height) in listOf(5.0 to 2.48, 20.0 to 5.13, 150.0 to 28.05)) {
+            val ground = north * distance - up * GpsSpatialProjector.EYE_HEIGHT_METERS
+            val mark = checkNotNull(standingDestination(destinationHeadTarget(ground, view), ground, view, north * -1.0))
+            val art = mark.artwork as MarkArtwork.Destination
+            val top = mark.bottom + up * art.height
+            val head = top - up * art.headY
+            val tip = top - up * art.tipY
+            assertEquals(10.0, view.elevation(head), 1e-9)
+            assertEquals(height, (head - ground).dot(up), 0.01)
+            assertTrue(tip.y >= 0.6)
+            assertTrue(angle(2 * PIN_HEAD_RADIUS * art.pinScale, head.length()) >= 2.5 - 1e-9)
+            assertTrue(angle(art.stroke, tip.length()) >= 0.4 - 1e-9)
+            val pinHeight = art.tipY - art.stroke * STROKE_PADDING
+            assertEquals(pinHeight / 2, art.tailEndY - art.tipY, 1e-9)
         }
     }
 
-    @Test fun dotCountFitsTheMeshAndFlowMovesOneMeterPerSecondAndWraps() {
-        val path = listOf(zero, MarkVector.UP * 4.0)
-        val initial = flowingDots(path, 2, 0)
-        assertEquals(initial.map { it + MarkVector.UP }, flowingDots(path, 2, 1_000))
-        assertEquals(initial, flowingDots(path, 2, 2_000))
+    @Test fun destinationRespectsTipAndGroundHeightLimitsAndClipsTheNearTail() {
+        val up = MarkVector.UP
+        val view = MarkView(zero, up)
+        val ground = north * 5.0 - up * GpsSpatialProjector.EYE_HEIGHT_METERS
+        val laggingHead = north * 5.0 + up * 0.77
+        val mark = checkNotNull(standingDestination(laggingHead, ground, view, north * -1.0))
+        val art = mark.artwork as MarkArtwork.Destination
+        assertEquals(0.6, (mark.bottom + up * (art.height - art.tipY)).y, 1e-9)
+        assertTrue(art.visibleHeight > art.tipY && art.visibleHeight < art.tailEndY)
+        val clipEdge = mark.bottom + up * (art.height - art.visibleHeight) + east * (art.width / 2)
+        assertTrue(view.elevation(clipEdge) in 5.0..5.02)
+        assertTrue(view.elevation(clipEdge - up * 0.002) < 5.0)
 
-        val view = MarkView(zero, MarkVector.UP)
-        for (kind in listOf(MarkKind.TURN, MarkKind.DESTINATION)) {
-            val center = north * 25.0 + MarkVector.UP * (kind.baseHeight - GpsSpatialProjector.EYE_HEIGHT_METERS)
-            val markView = view.forKind(kind)
-            val dots = markDots(kind, center, east, markView, 0)
-            val moved = markDots(kind, center, east, markView, 100)
-            assertTrue(dots.size in 1..MAX_MARK_DOTS)
-            assertEquals(dots.size, moved.size)
-            assertTrue(dots.first() != moved.first())
-            val layers = dotTriangles(moved, markView)
-            assertTrue(layers.zip(markDotVertexCapacities(kind)).all { (vertices, capacity) ->
-                vertices.size in 1..capacity
-            })
+        val farGround = north * 150.0 - up * GpsSpatialProjector.EYE_HEIGHT_METERS
+        val highView = MarkView(up * 15.0, up)
+        val capped = checkNotNull(
+            standingDestination(destinationHeadTarget(farGround, highView), farGround, highView, north * -1.0),
+        )
+        assertEquals(40.0, (capped.bottom - farGround).dot(up) + capped.artwork.height, 1e-9)
+        assertNull(standingDestination(laggingHead, ground - up * 50.0, view, north * -1.0))
+    }
+
+    @Test fun destinationHeadHeightSmoothsASubMeterChangeInWalkingDistance() {
+        val up = MarkVector.UP
+        val ground = north * 20.0 - up * GpsSpatialProjector.EYE_HEIGHT_METERS
+        val initial = destinationHeadTarget(ground, MarkView(zero, up))
+        val nextView = MarkView(north * 0.5, up)
+        val next = destinationHeadTarget(ground, nextView)
+        val position = SmoothedMarkPosition(initial, minimumChangeMeters = 0.05)
+        position.retarget(next, 500)
+        assertVector(initial, position.at(500))
+        assertVector(initial.toward(next, 0.5), position.at(1_000))
+        assertVector(next, position.at(1_500))
+    }
+
+    @Test fun previewSelectsTheOutgoingDirectionAndDestination() {
+        val cases = mapOf(
+            null to 90.0, "unknown" to 90.0, "right" to 90.0, "left" to 270.0,
+            "straight" to 0.0, "uturn" to 180.0, "slight_right" to 45.0,
+        )
+        for ((key, bearing) in cases) {
+            val nav = markPreviewNav(origin, 20.0, key)
+            val turn = checkNotNull(nav.guidance.nextTurn)
+            val corner = turn.step.start
+            assertEquals(0.0, checkNotNull(origin.bearingTo(corner)), 1e-9)
+            assertEquals(20.0, origin.distanceTo(corner), 0.03)
+            assertEquals(bearing, checkNotNull(corner.bearingTo(nav.destination.point)), 1e-6)
+            assertEquals(15.0, corner.distanceTo(nav.destination.point), 0.02)
+            assertEquals(nav.destination.point, turn.step.end)
         }
     }
 
-    @Test fun endingHidesEntitiesAndLiveRemovalAlsoDetachesFromTheSceneGraph() {
+    private fun direction(bearing: Double): MarkVector {
+        val angle = Math.toRadians(bearing)
+        return MarkVector(sin(angle), 0.0, -cos(angle))
+    }
+
+    private fun angle(width: Double, distance: Double) = Math.toDegrees(2 * atan(width / (2 * distance)))
+
+    @Test fun standingPanelCleanupOnlyDisablesAndDetachesWhileTheSessionIsLive() {
         val calls = mutableListOf<String>()
         val disable = { calls += "disable" }
         val detachFromScene = { calls += "detach" }
