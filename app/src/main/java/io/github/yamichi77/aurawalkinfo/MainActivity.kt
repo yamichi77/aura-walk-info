@@ -18,6 +18,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
@@ -32,6 +33,7 @@ import io.github.yamichi77.aurawalkinfo.diagnostics.HEAD_TRACKING
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
 import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
+import io.github.yamichi77.aurawalkinfo.diagnostics.markPreviewNav
 import io.github.yamichi77.aurawalkinfo.diagnostics.rememberSkyBandSettings
 import io.github.yamichi77.aurawalkinfo.heading.ObserveHeadPoses
 import io.github.yamichi77.aurawalkinfo.geospatial.ObserveGeospatial
@@ -133,6 +135,8 @@ class MainActivity : ComponentActivity() {
         if (spatialTest) {
             spatialTestDistanceMeters = intent.getFloatExtra("distance", 4f).coerceIn(1f, 200f)
         }
+        val markPreview = mode == "markpreview"
+        val markPreviewTurnMeters = intent.getFloatExtra("distance", 20f).coerceIn(3f, 140f).toDouble()
         val headingSpeech = mode == "heading" || mode == "speech"
         val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" ||
             headingSpeech || spatialTest
@@ -238,7 +242,14 @@ class MainActivity : ComponentActivity() {
                     val pics by container.picsReceiver.candidate.collectAsStateWithLifecycle()
                     val displayedState = debug.fakeState ?: state
                     val denied = !locationGranted && debug.fakeState == null
-                    val navState by container.navRepository.state.collectAsStateWithLifecycle()
+                    val repositoryNav by container.navRepository.state.collectAsStateWithLifecycle()
+                    // Debug only: a fixed route ahead of the fake fix, to look at the spatial arrow and pin.
+                    val previewNav = remember(displayedState.mapCenter) {
+                        displayedState.mapCenter?.takeIf { markPreview }?.let { center ->
+                            markPreviewNav(NavPoint(center.latitude, center.longitude), markPreviewTurnMeters)
+                        }
+                    }
+                    val navState = previewNav ?: repositoryNav
                     val skyBandSettings = rememberSkyBandSettings(container.hudSettings)
                     val spec = hudVisualSpecFor(
                         displayedState, noticePending = visibility.noticePending,
