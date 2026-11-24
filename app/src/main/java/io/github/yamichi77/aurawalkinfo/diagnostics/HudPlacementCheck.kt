@@ -64,7 +64,7 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
         return true
     }
 
-    /** Null while sampling. True at completion if the visual A/B fallback is needed. */
+    /** Null while sampling. Non-null once the check has finished. */
     fun sample(session: Session, now: Long, pose: Pose?, speed: Double?, hiddenSince: Long?): Boolean? {
         val start = startedAt ?: now.also { startedAt = it }
         if (pose != null) poseAvailable = true
