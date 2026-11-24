@@ -43,6 +43,7 @@ import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.pics.runPicsBleProbe
 import io.github.yamichi77.aurawalkinfo.pics.supportsPicsBle
 import io.github.yamichi77.aurawalkinfo.spatial.SCENE_UNDERSTANDING_COARSE
+import io.github.yamichi77.aurawalkinfo.spatial.destinationHeadElevationDegrees
 import io.github.yamichi77.aurawalkinfo.spatial.spatialTestDistanceMeters
 import io.github.yamichi77.aurawalkinfo.spatial.SpatialMarks
 import io.github.yamichi77.aurawalkinfo.spatial.SpatialRenderDiagnosis
@@ -138,6 +139,10 @@ class MainActivity : ComponentActivity() {
         val markPreview = mode == "markpreview"
         val markPreviewTurnMeters = intent.getFloatExtra("distance", 20f).coerceIn(3f, 140f).toDouble()
         val markPreviewDirection = if (markPreview) intent.getStringExtra("turn") else null
+        if (markPreview && intent.hasExtra("pin_elevation")) {
+            destinationHeadElevationDegrees = intent.getFloatExtra("pin_elevation", 10f).coerceIn(5f, 30f).toDouble()
+            Log.i("AuraSpatial", "PREVIEW pin_elevation=$destinationHeadElevationDegrees")
+        }
         val headingSpeech = mode == "heading" || mode == "speech"
         val probe = mode == "probe" || mode == "map" || mode == "maplite" || mode == "map3d" ||
             headingSpeech || spatialTest

@@ -8,7 +8,10 @@ import kotlin.math.sin
 import kotlin.math.tan
 
 private const val TURN_CLEARANCE_METERS = 0.6
-private const val DESTINATION_HEAD_ELEVATION_DEGREES = 10.0
+internal const val DESTINATION_HEAD_ELEVATION_DEGREES = 15.0
+
+/** Debug only: the pin elevation, set by `--ef pin_elevation` in markpreview to compare heights. */
+internal var destinationHeadElevationDegrees = DESTINATION_HEAD_ELEVATION_DEGREES
 private const val DESTINATION_TIP_CLEARANCE_METERS = 0.6
 private const val DESTINATION_TOP_METERS = 40.0
 private const val NEAR_ARROW_DISTANCE_METERS = 10.0
@@ -140,7 +143,7 @@ internal fun standingArrow(
 
 internal fun destinationHeadTarget(ground: MarkVector, view: MarkView): MarkVector {
     val offset = ground - view.eye
-    val rise = offset.horizontal(view.up).length() * tan(Math.toRadians(DESTINATION_HEAD_ELEVATION_DEGREES))
+    val rise = offset.horizontal(view.up).length() * tan(Math.toRadians(destinationHeadElevationDegrees))
     return ground + view.up * (rise - offset.dot(view.up))
 }
 

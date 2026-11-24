@@ -169,17 +169,17 @@ class SpatialMarkModelTest {
         }
     }
 
-    @Test fun destinationHeadIsTenDegreesUpAtFiveTwentyAndOneHundredFiftyMeters() {
+    @Test fun destinationHeadIsFifteenDegreesUpAtFiveTwentyAndOneHundredMeters() {
         val up = MarkVector.UP
         val view = MarkView(zero, up)
-        for ((distance, height) in listOf(5.0 to 2.48, 20.0 to 5.13, 150.0 to 28.05)) {
+        for ((distance, height) in listOf(5.0 to 2.94, 20.0 to 6.96, 100.0 to 28.39)) {
             val ground = north * distance - up * GpsSpatialProjector.EYE_HEIGHT_METERS
             val mark = checkNotNull(standingDestination(destinationHeadTarget(ground, view), ground, view, north * -1.0))
             val art = mark.artwork as MarkArtwork.Destination
             val top = mark.bottom + up * art.height
             val head = top - up * art.headY
             val tip = top - up * art.tipY
-            assertEquals(10.0, view.elevation(head), 1e-9)
+            assertEquals(DESTINATION_HEAD_ELEVATION_DEGREES, view.elevation(head), 1e-9)
             assertEquals(height, (head - ground).dot(up), 0.01)
             assertTrue(tip.y >= 0.6)
             assertTrue(angle(2 * PIN_HEAD_RADIUS * art.pinScale, head.length()) >= 2.5 - 1e-9)
