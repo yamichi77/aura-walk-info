@@ -1,5 +1,7 @@
 package io.github.yamichi77.aurawalkinfo.ui.hud
 
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PathMeasure
@@ -25,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudDetail
 import io.github.yamichi77.aurawalkinfo.ui.theme.HudText
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -44,13 +47,44 @@ internal class CountdownArtwork(seed: Int = 11) {
         val path = quantumTextPath(text, paint)
         val bounds = RectF()
         path.computeBounds(bounds, true)
-        path.offset(-bounds.centerX(), -bounds.centerY())
+        // Center on the filled area, not the bounds: the flag of a 1 widens its bounds to the left,
+        // so bounds centering put its stem visibly right of the 2 and 3.
+        path.offset(-glyphMassCenterX(path, bounds), -bounds.centerY())
         val factor = 1f / bounds.height()
         path.transform(Matrix().apply { setScale(factor, factor) })
 
         Glyph(digit, path.asComposePath(), sampleQuantumPath(path, COUNTDOWN_PARTICLE_COUNT, seed + digit))
     }
 }
+
+/** Horizontal center of the filled area of [path], found by drawing it into a small alpha bitmap. */
+internal fun glyphMassCenterX(path: android.graphics.Path, bounds: RectF): Float {
+    val scale = GlyphRasterHeight / bounds.height()
+    val width = ceil(bounds.width() * scale).toInt() + 2
+    val height = GlyphRasterHeight.toInt() + 2
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    AndroidCanvas(bitmap).apply {
+        translate(1f - bounds.left * scale, 1f - bounds.top * scale)
+        scale(scale, scale)
+        drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG))
+    }
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    bitmap.recycle()
+    var weight = 0.0
+    var moment = 0.0
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            val value = pixels[y * width + x] ushr 24
+            weight += value
+            moment += value * (x + 0.5)
+        }
+    }
+    if (weight == 0.0) return bounds.centerX()
+    return bounds.left + ((moment / weight).toFloat() - 1f) / scale
+}
+
+private const val GlyphRasterHeight = 128f
 
 internal fun quantumTextPath(text: String, paint: Paint) = android.graphics.Path().apply {
     paint.getTextPath(text, 0, text.length, 0f, 0f, this)
