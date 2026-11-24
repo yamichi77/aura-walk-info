@@ -61,6 +61,7 @@ import io.github.yamichi77.aurawalkinfo.ui.fallback.PhoneScreen
 import java.util.Locale
 
 private const val HeadMotionTag = "AuraHeadMotion"
+internal const val HudFollowHalfLifeMillis = 50L
 
 @OptIn(ExperimentalFollowingSubspaceApi::class)
 @Composable
@@ -171,10 +172,13 @@ internal fun HudScene(
     }
     if (!configured || spec is HudVisualSpec.Hidden) return
     // In rc01, the view target reads the initial ArDevice pose even before TRACKING.
-    // A 1 ms half-life takes the latest pose on each frame without tight's 87 ms smoothing.
-    val follow = remember {
+    // tight is this soft mode with an 87 ms half-life. 1 ms snapped to each ArDevice pose and
+    // juddered on AURA. Compared 87/50/25/10 ms on the device (2026-11-24); 50 ms was best.
+    val followHalfLife = debug.followHalfLifeMillis ?: HudFollowHalfLifeMillis
+    val follow = remember(followHalfLife) {
+        Log.i("AuraHud", "follow halfLifeMillis=$followHalfLife")
         FollowTarget.view(
-            FollowMode.soft(TrackedDimensions.All, halfLifeMillis = 1L, startDelay = 0L,
+            FollowMode.soft(TrackedDimensions.All, halfLifeMillis = followHalfLife, startDelay = 0L,
                 startThresholds = FollowThresholds.Zero),
         )
     }

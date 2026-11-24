@@ -17,6 +17,8 @@ internal data class HudDebugOptions(
     val fakeState: WalkSessionState? = null,
     val resetNotice: Boolean = false,
     val startMode: SessionStartMode? = null,
+    /** Debug only: half-life of the HUD's head follow, to compare smoothing on the device. */
+    val followHalfLifeMillis: Long? = null,
 ) {
     fun captureName(route: String, panel: String) = if (capture) "hud-$route-$panel.png" else null
 
@@ -52,6 +54,7 @@ internal data class HudDebugOptions(
                     "standby" -> SessionStartMode.STANDBY
                     else -> null
                 },
+                followHalfLifeMillis = intent.getIntExtra("followHalfLife", -1).takeIf { it in 1..500 }?.toLong(),
                 fakeState = motion?.let {
                     WalkSessionState(
                         distanceMeters = 1_240.0,
