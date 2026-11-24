@@ -16,7 +16,8 @@ REQUIRED = {
     "gps_bearing_deg", "gps_bearing_acc_deg", "gps_speed_mps",
 }
 YAW_TO_CLOCKWISE = -1
-MIN_SAMPLES = 20
+MIN_SAMPLES = 8
+FULL_CONFIDENCE_SAMPLES = 20
 RECENT_SAMPLES = 120
 
 
@@ -131,7 +132,8 @@ def estimate_north(samples, now):
         return None
     offset, deviation = circular_stats(retained)
     age_minutes = max(0, now - samples[-1][0]) / 60
-    uncertainty = max(8, deviation / math.sqrt(len(retained) / 5)) + age_minutes
+    floor = 12 if len(retained) < FULL_CONFIDENCE_SAMPLES else 8
+    uncertainty = max(floor, deviation / math.sqrt(len(retained) / 5)) + age_minutes
     return Estimate(offset, uncertainty, len(samples), len(retained))
 
 
@@ -150,6 +152,12 @@ def report(rows):
 
 
 def self_test():
+    samples = [(step, 154) for step in range(20)]
+    assert estimate_north(samples[:7], 6) is None
+    assert estimate_north(samples[:8], 7).uncertainty == 12
+    assert estimate_north(samples[:19] + [(19, 214)], 19).uncertainty == 12
+    assert estimate_north(samples, 19).uncertainty == 8
+
     source = io.StringIO()
     writer = csv.DictWriter(source, fieldnames=sorted(REQUIRED))
     writer.writeheader()

@@ -14,7 +14,7 @@ import androidx.xr.scenecore.AnchorSpace
 import androidx.xr.scenecore.PanelEntity
 import kotlin.math.roundToInt
 
-internal class SignalTotemPanel(session: Session, context: Context, parent: AnchorSpace) : AutoCloseable {
+internal class SignalTotemPanel(session: Session, context: Context, parent: AnchorSpace) {
     private val artwork = SignalTotemArtwork(context)
     private val panel = PanelEntity.create(
         session, artwork, FloatSize2d(SIGNAL_WIDTH_METERS.toFloat(), SIGNAL_ROW_HEIGHT_METERS.toFloat()),
@@ -44,9 +44,8 @@ internal class SignalTotemPanel(session: Session, context: Context, parent: Anch
         if (panel.isEnabled()) panel.setEnabled(false)
     }
 
-    override fun close() {
-        hide()
-        panel.parent = null
+    fun removeFromScene() {
+        panel.hideSpatialEntity(detach = true)
     }
 }
 

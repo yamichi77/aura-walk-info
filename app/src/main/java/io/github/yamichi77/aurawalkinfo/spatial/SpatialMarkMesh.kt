@@ -1,6 +1,9 @@
 package io.github.yamichi77.aurawalkinfo.spatial
 
+import android.app.Activity
+import android.content.Context
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
 import androidx.xr.runtime.Session
 import androidx.xr.runtime.math.BoundingBox
 import androidx.xr.runtime.math.Pose
@@ -20,12 +23,9 @@ import androidx.xr.scenecore.VertexLayout
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-// Each of the two clipped quads can have eight corners. Draw both windings.
-private const val MAX_VERTICES_PER_STROKE = 2 * (8 - 2) * 3 * 2
 private const val POSITION_BYTES = 3 * Float.SIZE_BYTES
 
-internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
-    private val capacities = strokeCounts.map { it * MAX_VERTICES_PER_STROKE }
+internal class SpatialMarkMesh(private val capacities: List<Int>) {
     private val vertexCount = capacities.sum()
     private val vertices = directBuffer(vertexCount * POSITION_BYTES)
     private val vertexData = ByteBufferRegion(vertices, 0, vertices.capacity())
@@ -38,26 +38,31 @@ internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
     private var lastOpacity = -1f
 
     suspend fun initialize(session: Session, parent: Entity, pose: Pose = Pose.Identity): MeshEntity {
-        val indices = directBuffer(vertexCount * Int.SIZE_BYTES)
-        repeat(vertexCount) { indices.putInt(it) }
-        indices.rewind()
-        val layout = VertexLayout.Builder().addAttribute(VertexAttribute.POSITION, VertexAttributeType.FLOAT3).build()
-        val meshBuffer = MeshBuffer.createDynamic(
-            session, layout, vertexCount, vertexCount, listOf(vertexData),
-            ByteBufferRegion(indices, 0, indices.capacity()),
-        )
-        buffer = meshBuffer
-        val builder = CustomMesh.BuilderFromMeshBuffer(session, meshBuffer)
-        var offset = 0
-        for (capacity in capacities) {
-            builder.addSubset(MeshSubsetTopology.TRIANGLES, offset, capacity)
-            offset += capacity
+        entity?.let { return it }
+        val meshBuffer = buffer ?: run {
+            val indices = directBuffer(vertexCount * Int.SIZE_BYTES)
+            repeat(vertexCount) { indices.putInt(it) }
+            indices.rewind()
+            val layout = VertexLayout.Builder().addAttribute(VertexAttribute.POSITION, VertexAttributeType.FLOAT3).build()
+            MeshBuffer.createDynamic(
+                session, layout, vertexCount, vertexCount, listOf(vertexData),
+                ByteBufferRegion(indices, 0, indices.capacity()),
+            ).also { buffer = it }
+        }
+        while (materials.size < capacities.size) {
             materials += KhronosUnlitMaterial.create(session, AlphaMode.BLEND).apply {
                 setBaseColorFactor(Vector4(0f, 0f, 0f, 0f))
             }
         }
-        val customMesh = builder.setBounds(bounds(Vector3.Zero, Vector3.Zero)).build()
-        mesh = customMesh
+        val customMesh = mesh ?: run {
+            val builder = CustomMesh.BuilderFromMeshBuffer(session, meshBuffer)
+            var offset = 0
+            for (capacity in capacities) {
+                builder.addSubset(MeshSubsetTopology.TRIANGLES, offset, capacity)
+                offset += capacity
+            }
+            builder.setBounds(bounds(Vector3.Zero, Vector3.Zero)).build().also { mesh = it }
+        }
         val node = MeshEntity.create(session, customMesh, materials, pose = pose)
         entity = node
         node.setEnabled(false)
@@ -66,7 +71,7 @@ internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
     }
 
     fun draw(geometry: List<List<MarkVector>>, colors: List<Color>, opacity: Float) {
-        val node = checkNotNull(entity)
+        val node = entity ?: return
         if (opacity <= 0f || geometry.all { it.isEmpty() }) {
             if (node.isEnabled()) node.setEnabled(false)
             return
@@ -117,16 +122,12 @@ internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
         if (!node.isEnabled()) node.setEnabled(true)
     }
 
-    override fun close() {
-        entity?.setEnabled(false)
-        entity?.parent = null
-        entity = null
-        mesh?.close()
-        mesh = null
-        buffer?.close()
-        buffer = null
-        materials.forEach { it.close() }
-        materials.clear()
+    fun hide() {
+        entity?.hideSpatialEntity()
+    }
+
+    fun removeFromScene() {
+        entity?.hideSpatialEntity(detach = true)
     }
 
     private fun bounds(minimum: Vector3, maximum: Vector3): BoundingBox {
@@ -135,4 +136,21 @@ internal class SpatialMarkMesh(strokeCounts: List<Int>) : AutoCloseable {
     }
 
     private fun directBuffer(bytes: Int) = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
+}
+
+// SceneCore owns entity reclamation. A detached MeshEntity retains the mesh and materials,
+// and CustomMesh retains its buffer. Closing them here can leave a native node using them.
+internal fun hideSpatialEntity(detach: Boolean, disable: () -> Unit, detachFromScene: () -> Unit) {
+    disable()
+    if (detach) detachFromScene()
+}
+
+internal fun Entity.hideSpatialEntity(detach: Boolean = false) {
+    hideSpatialEntity(detach, { setEnabled(false) }, { parent = null })
+}
+
+internal fun Lifecycle.canRemoveSpatialEntities(context: Context): Boolean {
+    val activity = context as? Activity
+    return currentState == Lifecycle.State.RESUMED &&
+        activity?.isFinishing != true && activity?.isChangingConfigurations != true
 }

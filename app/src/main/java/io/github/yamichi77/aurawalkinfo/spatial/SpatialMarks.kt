@@ -30,6 +30,7 @@ import io.github.yamichi77.aurawalkinfo.heading.HeadingEstimator
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavState
+import io.github.yamichi77.aurawalkinfo.nav.distanceTo
 import io.github.yamichi77.aurawalkinfo.pics.PicsCandidate
 import io.github.yamichi77.aurawalkinfo.session.WalkSessionState
 import java.util.Locale
@@ -40,7 +41,9 @@ import kotlinx.coroutines.launch
 
 internal const val SCENE_UNDERSTANDING_COARSE = "android.permission.SCENE_UNDERSTANDING_COARSE"
 private const val TAG = "AuraSpatial"
-private val MarkColors = listOf(Color(0xFF7FDBFF))
+private val MarkColors = Color(0xFF7FDBFF).let { color ->
+    listOf(color, color.copy(alpha = 0.20f), color.copy(alpha = 0.08f))
+}
 
 @Composable
 internal fun SpatialMarks(
@@ -69,110 +72,115 @@ internal fun SpatialMarks(
     val hasTargets by rememberUpdatedState(nav is NavState.Guiding || nav is NavState.Rerouting || signal != null)
     LaunchedEffect(session, context, owner, settings, heading, anchorGranted, debug) {
         if (session == null) return@LaunchedEffect
-        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            val scene = SpatialMarkScene(session, context, debug)
-            if (debug) launch {
-                snapshotFlow { settings.northOverride }.collectLatest { override ->
-                    if (override == null) return@collectLatest
-                    val yaw = heading.awaitTrackedYaw()
-                    Log.i(TAG, "NORTH_OVERRIDE rawHead=${override.bearingForYaw(yaw).diagnostic()} " +
-                        "uncertainty=${override.uncertaintyDegrees.diagnostic()}")
+        // Keep renderers across pauses. ON_PAUSE also precedes Session's ON_DESTROY cleanup.
+        val scene = SpatialMarkScene(session, context, debug)
+        try {
+            owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                if (debug) launch {
+                    snapshotFlow { settings.northOverride }.collectLatest { override ->
+                        if (override == null) return@collectLatest
+                        val yaw = heading.awaitTrackedYaw()
+                        Log.i(TAG, "NORTH_OVERRIDE rawHead=${override.bearingForYaw(yaw).diagnostic()} " +
+                            "uncertainty=${override.uncertaintyDegrees.diagnostic()}")
+                    }
                 }
-            }
-            try {
-                var device: ArDevice? = null
-                var fixTime: Long? = null
-                var fixPoint: NavPoint? = null
-                var fixEye: Vector3? = null
-                var lastEye: Vector3? = null
-                var nextRelativeLogAt = 0L
-                var nextPositionAt = 0L
-                var wasVps = false
-                var placementFailure: MarkReason? = null
-                snapshotFlow {
-                    // Reevaluate signal eligibility immediately even while the navigation marks stay active.
-                    spatialUpdateMode(hasTargets, settings.spatialMarksEnabled, walk.motionState) to
-                        decisions?.get(MarkKind.SIGNAL.ordinal)?.target?.signal?.intersectionId
-                }
-                    .collectLatest { (mode, _) ->
-                        if (mode == SpatialUpdateMode.FAST) {
-                            scene.draw(MarkReason.FAST, decisions, null, SystemClock.elapsedRealtime())
-                            return@collectLatest
-                        }
-                        val fadingOut = mode != SpatialUpdateMode.ACTIVE && scene.hasVisibleOrFadingMarks
-                        var interval = spatialUpdateIntervalMillis(mode, fadingOut || scene.isFading)
-                        while (interval != null) {
-                            val now = SystemClock.elapsedRealtime()
-                            if (device == null && session.config.deviceTracking == DeviceTrackingMode.SPATIAL) {
-                                device = ArDevice.getInstance(session)
+                try {
+                    var device: ArDevice? = null
+                    var fixTime: Long? = null
+                    var fixPoint: NavPoint? = null
+                    var fixEye: Vector3? = null
+                    var lastEye: Vector3? = null
+                    var nextRelativeLogAt = 0L
+                    var nextPositionAt = 0L
+                    var wasVps = false
+                    var placementFailure: MarkReason? = null
+                    snapshotFlow {
+                        // Reevaluate signal eligibility immediately even while the navigation marks stay active.
+                        spatialUpdateMode(hasTargets, settings.spatialMarksEnabled, walk.motionState) to
+                            decisions?.get(MarkKind.SIGNAL.ordinal)?.target?.signal?.intersectionId
+                    }
+                        .collectLatest { (mode, _) ->
+                            if (mode == SpatialUpdateMode.FAST) {
+                                scene.draw(MarkReason.FAST, decisions, null, null, SystemClock.elapsedRealtime())
+                                return@collectLatest
                             }
-                            val eye = device?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING }
-                                ?.devicePose?.translation?.takeIf { it.markVector().isFinite() }
-                            if (eye != null) lastEye = eye
-                            val targets = decisions
-                            var reason = mode.hideReason
-                            if (mode == SpatialUpdateMode.ACTIVE) {
-                                val sample = walk
-                                val point = fix
-                                val gpsNorth = settings.northOverride ?: heading.estimate(now)
-                                val vps = if (settings.northOverride == null) heading.geospatial.fix(now) else null
-                                val north = vps?.north ?: gpsNorth
-                                reason = spatialBlocker(
-                                    sample.motionState, settings.spatialMarksEnabled,
-                                    eye != null && !settings.simulateTrackingLoss, north, point, sample.lastFixAccuracyMeters,
-                                )
-                                if (fixTime != sample.lastFixTimeMillis || fixPoint != point) {
-                                    fixTime = sample.lastFixTimeMillis
-                                    fixPoint = point
-                                    fixEye = null
+                            val fadingOut = mode != SpatialUpdateMode.ACTIVE && scene.hasVisibleOrFadingMarks
+                            var interval = spatialUpdateIntervalMillis(mode, fadingOut || scene.isFading)
+                            while (interval != null) {
+                                val now = SystemClock.elapsedRealtime()
+                                if (device == null && session.config.deviceTracking == DeviceTrackingMode.SPATIAL) {
+                                    device = ArDevice.getInstance(session)
                                 }
-                                if (fixEye == null && eye != null && point != null) {
-                                    fixEye = heading.poseForFix(fixTime)?.perceptionPosition ?: eye.takeIf {
-                                        (debug && fixTime == null) ||
-                                            fixTime?.let { now - it in 0..HeadingEstimator.MAX_POSE_GAP_MS } == true
-                                    }
-                                }
-
-                                if (reason == null && targets?.any { it.target != null } == true) {
-                                    val gpsFix = fixEye?.let { referenceEye ->
-                                        gpsNorth?.let { SpatialFix(checkNotNull(point), referenceEye.markVector(), it.offsetDegrees) }
-                                    }
-                                    val fallbackReason = spatialBlocker(
+                                val eye = device?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING }
+                                    ?.devicePose?.translation?.takeIf { it.markVector().isFinite() }
+                                if (eye != null) lastEye = eye
+                                val targets = decisions
+                                var reason = mode.hideReason
+                                if (mode == SpatialUpdateMode.ACTIVE) {
+                                    val sample = walk
+                                    val point = fix
+                                    val gpsNorth = settings.northOverride ?: heading.estimate(now)
+                                    val vps = if (settings.northOverride == null) heading.geospatial.fix(now) else null
+                                    val north = vps?.north ?: gpsNorth
+                                    reason = spatialBlocker(
                                         sample.motionState, settings.spatialMarksEnabled,
-                                        eye != null && !settings.simulateTrackingLoss, gpsNorth, point, sample.lastFixAccuracyMeters,
-                                    ) ?: MarkReason.TRACKING_LOST.takeIf { gpsFix == null }
-                                    reason = when {
-                                        !anchorGranted -> MarkReason.ANCHOR_UNAVAILABLE
-                                        vps == null && fallbackReason != null -> fallbackReason
-                                        now < nextPositionAt && wasVps == (vps != null) -> placementFailure
-                                        else -> {
-                                            nextPositionAt = now + MARK_POSITION_INTERVAL_MS
-                                            wasVps = vps != null
-                                            scene.position(
-                                                checkNotNull(eye), gpsFix, vps, fallbackReason, targets, now,
-                                            ).also { placementFailure = it }
+                                        eye != null && !settings.simulateTrackingLoss, north, point, sample.lastFixAccuracyMeters,
+                                    )
+                                    if (fixTime != sample.lastFixTimeMillis || fixPoint != point) {
+                                        fixTime = sample.lastFixTimeMillis
+                                        fixPoint = point
+                                        fixEye = null
+                                    }
+                                    if (fixEye == null && eye != null && point != null) {
+                                        fixEye = heading.poseForFix(fixTime)?.perceptionPosition ?: eye.takeIf {
+                                            (debug && fixTime == null) ||
+                                                fixTime?.let { now - it in 0..HeadingEstimator.MAX_POSE_GAP_MS } == true
+                                        }
+                                    }
+
+                                    if (reason == null && targets?.any { it.target != null } == true) {
+                                        val gpsFix = fixEye?.let { referenceEye ->
+                                            gpsNorth?.let { SpatialFix(checkNotNull(point), referenceEye.markVector(), it.offsetDegrees) }
+                                        }
+                                        val fallbackReason = spatialBlocker(
+                                            sample.motionState, settings.spatialMarksEnabled,
+                                            eye != null && !settings.simulateTrackingLoss, gpsNorth, point, sample.lastFixAccuracyMeters,
+                                        ) ?: MarkReason.TRACKING_LOST.takeIf { gpsFix == null }
+                                        reason = when {
+                                            !anchorGranted -> MarkReason.ANCHOR_UNAVAILABLE
+                                            vps == null && fallbackReason != null -> fallbackReason
+                                            now < nextPositionAt && wasVps == (vps != null) -> placementFailure
+                                            else -> {
+                                                nextPositionAt = now + MARK_POSITION_INTERVAL_MS
+                                                wasVps = vps != null
+                                                scene.position(
+                                                    checkNotNull(eye), gpsFix, vps, fallbackReason, targets, now,
+                                                ).also { placementFailure = it }
+                                            }
                                         }
                                     }
                                 }
+                                scene.draw(reason, targets, lastEye, fix, now)
+                                if (debug && now >= nextRelativeLogAt) {
+                                    // Where each mark is as seen from the head (T20: marks were logged as shown but not seen).
+                                    nextRelativeLogAt = now + 1_000L
+                                    device?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING }
+                                        ?.devicePose?.let { scene.logRelative(it, now) }
+                                }
+                                interval = spatialUpdateIntervalMillis(mode, scene.isFading)
+                                if (interval != null) delay(interval)
                             }
-                            scene.draw(reason, targets, lastEye, now)
-                            if (debug && now >= nextRelativeLogAt) {
-                                // Where each mark is as seen from the head (T20: marks were logged as shown but not seen).
-                                nextRelativeLogAt = now + 1_000L
-                                device?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING }
-                                    ?.devicePose?.let { scene.logRelative(it, now) }
-                            }
-                            interval = spatialUpdateIntervalMillis(mode, scene.isFading)
-                            if (interval != null) delay(interval)
                         }
-                    }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                if (debug) Log.w(TAG, "HIDE all reason=RENDER_UNAVAILABLE type=${error.javaClass.simpleName}")
-            } finally {
-                scene.close()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    if (debug) Log.w(TAG, "HIDE all reason=RENDER_UNAVAILABLE type=${error.javaClass.simpleName}")
+                } finally {
+                    if (owner.lifecycle.currentState != Lifecycle.State.DESTROYED) scene.hide()
+                }
             }
+        } finally {
+            if (owner.lifecycle.canRemoveSpatialEntities(context)) scene.removeFromScene()
         }
     }
 }
@@ -181,7 +189,7 @@ private class SpatialMarkScene(
     private val session: Session,
     private val context: Context,
     private val debug: Boolean,
-) : AutoCloseable {
+) {
     private val marks = MarkKind.entries.map(::SceneMark)
     private var anchor: Anchor? = null
     private var anchorSpace: AnchorSpace? = null
@@ -201,7 +209,7 @@ private class SpatialMarkScene(
     ): MarkReason? {
         if (anchorFailure) return MarkReason.ANCHOR_UNAVAILABLE
         if (anchor?.state?.value?.trackingState == TrackingState.STOPPED) {
-            close()
+            removeFromScene()
         }
         if (anchor == null) {
             // Keep a single nearby anchor. The three marks move only relative to this world-space parent.
@@ -217,13 +225,7 @@ private class SpatialMarkScene(
         if (!prepared) {
             // All suspending XR resource creation finishes before any mark can be visible.
             val parent = checkNotNull(anchorSpace)
-            try {
-                marks.forEach { it.prepare(session, context, parent) }
-            } catch (cancelled: CancellationException) {
-                // A change in update mode can cancel construction before the mesh is ready.
-                close()
-                throw cancelled
-            }
+            marks.forEach { it.prepare(session, context, parent) }
             prepared = true
             // Read the safety inputs again after the suspension before placing anything.
             return MarkReason.ANCHOR_UNAVAILABLE
@@ -251,8 +253,7 @@ private class SpatialMarkScene(
             val world = vpsPositions?.get(index) ?: GpsSpatialProjector.project(gpsFix, target.point, mark.kind.baseHeight)
             val center = fromPerception.transformPoint(world.vector3()).markVector()
             val forward = fromPerception.transformVector(markForward(target, northOffset).vector3()).markVector()
-            val up = fromPerception.transformVector(Vector3(0f, 1f, 0f)).markVector()
-            mark.position(target, center, forward, up, usingVps, now)
+            mark.position(target, center, forward, usingVps, now)
         }
         return null
     }
@@ -274,7 +275,7 @@ private class SpatialMarkScene(
         }
     }
 
-    fun draw(reason: MarkReason?, decisions: List<MarkDecision>?, eye: Vector3?, now: Long) {
+    fun draw(reason: MarkReason?, decisions: List<MarkDecision>?, eye: Vector3?, current: NavPoint?, now: Long) {
         val view = if (eye == null) null else anchorPose()?.inverse?.let { fromPerception ->
             MarkView(
                 fromPerception.transformPoint(eye).markVector(),
@@ -284,12 +285,16 @@ private class SpatialMarkScene(
         for ((index, mark) in marks.withIndex()) {
             val decision = decisions?.get(index)
             val why = reason ?: decision?.reason ?: MarkReason.NO_FIX
-            mark.draw(why, decision?.target, view, now, debug)
+            mark.draw(why, decision?.target, view, current, now, debug)
         }
     }
 
-    override fun close() {
-        marks.forEach { it.close() }
+    fun hide() {
+        marks.forEach { it.hide() }
+    }
+
+    fun removeFromScene() {
+        marks.forEach { it.removeFromScene() }
         anchorSpace = null
         anchor?.detach()
         anchor = null
@@ -297,19 +302,19 @@ private class SpatialMarkScene(
     }
 }
 
-private class SceneMark(val kind: MarkKind) : AutoCloseable {
+private class SceneMark(val kind: MarkKind) {
     private var mesh: SpatialMarkMesh? = null
     private var signalPanel: SignalTotemPanel? = null
     private var lastShownSignal: SignalTotem? = null
     private var target: MarkTarget? = null
     private var position: SmoothedMarkPosition? = null
     private var forward = MarkVector(0.0, 0.0, -1.0)
-    private var up = MarkVector.UP
-    private var fade = MarkFade()
+    private val maxOpacity = if (kind == MarkKind.SIGNAL) MARK_MAX_OPACITY else 1f
+    private var fade = MarkFade(maxOpacity)
     private var lastReason: MarkReason? = null
     private var lastView: MarkView? = null
-    private var clipKey: ClipKey? = null
     private var lastClip: ClippedMark? = null
+    private var nearTurn = false
     var opacity = 0f
         private set
     val isFading get() = fade.isAnimating
@@ -318,30 +323,28 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
 
     suspend fun prepare(session: Session, context: Context, parent: AnchorSpace) {
         if (kind == MarkKind.SIGNAL) {
-            signalPanel = SignalTotemPanel(session, context, parent)
+            if (signalPanel == null) signalPanel = SignalTotemPanel(session, context, parent)
             return
         }
-        val created = SpatialMarkMesh(kind.strokeCounts)
-        mesh = created
-        created.initialize(session, parent)
+        val renderer = mesh ?: SpatialMarkMesh(markDotVertexCapacities(kind)).also { mesh = it }
+        renderer.initialize(session, parent)
     }
 
     private var usingVps = false
 
-    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, up: MarkVector, usingVps: Boolean, now: Long) {
+    fun position(target: MarkTarget, center: MarkVector, forward: MarkVector, usingVps: Boolean, now: Long) {
         if (!sameMark(this.target, target)) {
             position = SmoothedMarkPosition(center)
-            fade = MarkFade()
+            fade = MarkFade(maxOpacity)
         } else {
             position?.retarget(center, now, sourceChanged = this.usingVps != usingVps)
         }
         this.usingVps = usingVps
         this.target = target
         this.forward = forward
-        this.up = up
     }
 
-    fun draw(reason: MarkReason, requested: MarkTarget?, view: MarkView?, now: Long, debug: Boolean) {
+    fun draw(reason: MarkReason, requested: MarkTarget?, view: MarkView?, current: NavPoint?, now: Long, debug: Boolean) {
         val center = position?.at(now)
         val stored = target
         val compatible = sameMark(stored, requested)
@@ -353,11 +356,16 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
             }
             return
         }
-        val usableView = view ?: lastView
-        if (view != null) lastView = view
+        val markView = view?.forKind(kind)
+        val usableView = markView ?: lastView
+        if (markView != null) lastView = markView
+        if (kind == MarkKind.TURN && stored != null && current != null) {
+            nearTurn = isNearTurn(current.distanceTo(stored.point))
+        }
         val clipped = if (reason == MarkReason.FAST || center == null || stored == null || usableView == null) null
             else if (reason == MarkReason.SHOW || opacity > 0f || reason != lastReason) {
-                clipMark(ClipKey(center, forward, up, usableView))
+                val dots = markDots(kind, center, forward, usableView, now, nearTurn)
+                ClippedMark(dotTriangles(dots, usableView), dots, center, usableView).also { lastClip = it }
             } else null
 
         val actual = when {
@@ -366,7 +374,7 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
             clipped == null || clipped.geometry.all { it.isEmpty() } -> MarkReason.BELOW_ELEVATION
             else -> MarkReason.SHOW
         }
-        opacity = fade.update(actual == MarkReason.SHOW, reason == MarkReason.FAST, now)
+        opacity = fade.update(actual == MarkReason.SHOW, reason == MarkReason.FAST, now) * arrowOpacity(nearTurn)
         mesh?.draw(clipped?.geometry.orEmpty(), MarkColors, opacity)
         if (debug && actual != lastReason) {
             val data = clipped ?: lastClip
@@ -382,7 +390,6 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
             target = null
             position = null
             lastClip = null
-            clipKey = null
         }
     }
 
@@ -422,46 +429,42 @@ private class SceneMark(val kind: MarkKind) : AutoCloseable {
         lastReason = actual
     }
 
-    private fun clipMark(key: ClipKey): ClippedMark {
-        if (key == clipKey) return checkNotNull(lastClip)
-        val (center, forward, up, view) = key
-        val right = forward.cross(up)
-        val strokes = markStrokes(kind, center, forward, up, view.eye)
-        val geometry = listOf(strokes.flatMap { it.clippedTriangles(view, up, right) })
-        val result = ClippedMark(geometry, strokes, center, view)
-        clipKey = key
-        lastClip = result
-        return result
+    fun hide() {
+        mesh?.hide()
+        signalPanel?.hide()
+        resetVisibility()
     }
 
-    override fun close() {
-        mesh?.close()
-        mesh = null
-        signalPanel?.close()
-        signalPanel = null
+    private fun resetVisibility() {
+        fade = MarkFade(maxOpacity)
+        lastView = null
+        lastClip = null
+        lastReason = null
         lastShownSignal = null
+        opacity = 0f
+    }
+
+    fun removeFromScene() {
+        mesh?.removeFromScene()
+        mesh = null
+        signalPanel?.removeFromScene()
+        signalPanel = null
         target = null
         position = null
-        fade = MarkFade()
-        lastView = null
-        clipKey = null
-        lastClip = null
-        opacity = 0f
+        nearTurn = false
+        resetVisibility()
     }
 }
 
-private data class ClipKey(
-    val center: MarkVector, val forward: MarkVector, val up: MarkVector, val view: MarkView,
-)
-
 private class ClippedMark(
-    val geometry: List<List<MarkVector>>, private val strokes: List<MarkStroke>,
+    val geometry: List<List<MarkVector>>, private val dots: List<MarkVector>,
     private val center: MarkVector, private val view: MarkView,
 ) {
     val distance get() = (center - view.eye).length()
 
-    fun elevationRange(): Pair<Double, Double> {
-        val points = geometry.flatten().ifEmpty { strokes.flatMap { listOf(it.start, it.end) } }
+    fun elevationRange(): Pair<Double, Double>? {
+        val points = geometry.flatten().ifEmpty { dots }
+        if (points.isEmpty()) return null
         return points.minOf(view::elevation) to points.maxOf(view::elevation)
     }
 }
@@ -469,6 +472,7 @@ private class ClippedMark(
 private fun sameMark(first: MarkTarget?, second: MarkTarget?): Boolean {
     if (first == null || second == null) return false
     return if (first.signal != null && second.signal != null) first.signal.intersectionId == second.signal.intersectionId
+    else if (first.turnStep != null || second.turnStep != null) first.turnStep == second.turnStep
     else first.point == second.point
 }
 

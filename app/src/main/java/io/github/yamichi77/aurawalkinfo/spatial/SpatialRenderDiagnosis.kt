@@ -51,88 +51,103 @@ internal fun SpatialRenderDiagnosis(headGranted: Boolean, anchorGranted: Boolean
     val spatial = LocalSpatialCapabilities.current.isSpatialUiEnabled
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(session, spatial, headGranted, anchorGranted, owner) {
-        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            val problem = when {
-                session == null || !spatial -> "SPATIAL_UI_UNAVAILABLE"
-                !headGranted -> "HEAD_PERMISSION_MISSING"
-                else -> null
-            }
-            if (problem != null) logUnavailable(problem)
-            else runDiagnosis(checkNotNull(session), anchorGranted)
+        val problem = when {
+            session == null || !spatial -> "SPATIAL_UI_UNAVAILABLE"
+            !headGranted -> "HEAD_PERMISSION_MISSING"
+            else -> null
         }
+        if (problem != null) owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { logUnavailable(problem) }
+        else runDiagnosis(checkNotNull(session), anchorGranted, owner.lifecycle)
     }
 }
 
-private suspend fun runDiagnosis(session: Session, anchorGranted: Boolean) {
-    val tracking = xrResult {
-        if (session.config.deviceTracking != DeviceTrackingMode.SPATIAL) {
-            val config = Config.Builder(session.config).setDeviceTracking(DeviceTrackingMode.SPATIAL).build()
-            check(session.configure(config) is SessionConfigureSuccess)
-        }
-        ArDevice.getInstance(session)
-    }
-    val device = tracking.getOrElse {
-        logUnavailable("TRACKING_SETUP_${it.javaClass.simpleName}")
-    }
-    val scene = session.scene
+private suspend fun runDiagnosis(session: Session, anchorGranted: Boolean, lifecycle: Lifecycle) {
     val samples = Sample.entries.map(::DiagnosisEntity)
     var anchor: Anchor? = null
     var anchorSpace: AnchorSpace? = null
+    var anchorPose: Pose? = null
     var anchorStatus = "-"
     var placed = false
 
-    try {
-        coroutineScope {
-            while (true) {
-                val state = device.state.value
-                val head = state.devicePose.takeIf { state.trackingState == TrackingState.TRACKING }
-                if (!placed && head != null) {
-                    placed = true
-                    for (sample in samples.filterNot { it.kind.anchored }) {
-                        // Convert once at placement. The saved pose is relative to the scene root.
-                        val localPose = xrResult {
-                            scene.perceptionSpace.transformPoseTo(sample.kind.poseFrom(head), scene.activitySpace)
-                        }
-                        launch { sample.create(session, scene.activitySpace, localPose) }
-                    }
+    suspend fun place(head: Pose) = coroutineScope {
+        val scene = session.scene
+        for (sample in samples.filterNot { it.kind.anchored }) {
+            // Convert once at placement. The saved pose is relative to the scene root.
+            val localPose = xrResult {
+                scene.perceptionSpace.transformPoseTo(sample.kind.poseFrom(head), scene.activitySpace)
+            }
+            launch { sample.create(session, scene.activitySpace, localPose) }
+        }
 
-                    // Use the same nearby-anchor strategy as the normal spatial marks.
-                    val anchorPose = Pose(head.translation)
-                    anchorStatus = if (anchorGranted) {
-                        xrResult {
-                            val result = Anchor.create(session, anchorPose)
-                            if (result is AnchorCreateSuccess) {
-                                anchor = result.anchor
-                                anchorSpace = AnchorSpace.create(session, result.anchor)
-                                "CREATED"
-                            } else result.javaClass.simpleName
-                        }.getOrElse { it.javaClass.simpleName }
-                    } else "ANCHOR_PERMISSION_MISSING"
-                    for (sample in samples.filter { it.kind.anchored }) {
-                        val parent = anchorSpace
-                        if (parent == null || parent.state == AnchorSpace.State.ERROR) {
-                            sample.creation = "FAILED:${if (parent == null) anchorStatus else parent.state}"
-                        } else {
-                            val localPose = Result.success(anchorPose.inverse.compose(sample.kind.poseFrom(head)))
-                            launch { sample.create(session, parent, localPose) }
+        // Use the same nearby-anchor strategy as the normal spatial marks.
+        val reference = anchorPose ?: Pose(head.translation).also { anchorPose = it }
+        if (anchorSpace == null) anchorStatus = if (anchorGranted) {
+            xrResult {
+                val result = Anchor.create(session, reference)
+                if (result is AnchorCreateSuccess) {
+                    anchor = result.anchor
+                    anchorSpace = AnchorSpace.create(session, result.anchor)
+                    "CREATED"
+                } else result.javaClass.simpleName
+            }.getOrElse { it.javaClass.simpleName }
+        } else "ANCHOR_PERMISSION_MISSING"
+        for (sample in samples.filter { it.kind.anchored }) {
+            val parent = anchorSpace
+            if (parent == null || parent.state == AnchorSpace.State.ERROR) {
+                sample.creation = "FAILED:${if (parent == null) anchorStatus else parent.state}"
+            } else {
+                val localPose = Result.success(reference.inverse.compose(sample.kind.poseFrom(head)))
+                launch { sample.create(session, parent, localPose) }
+            }
+        }
+    }
+
+    try {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                val tracking = xrResult {
+                    if (session.config.deviceTracking != DeviceTrackingMode.SPATIAL) {
+                        val config = Config.Builder(session.config).setDeviceTracking(DeviceTrackingMode.SPATIAL).build()
+                        check(session.configure(config) is SessionConfigureSuccess)
+                    }
+                    ArDevice.getInstance(session)
+                }
+                val device = tracking.getOrElse { logUnavailable("TRACKING_SETUP_${it.javaClass.simpleName}") }
+                val scene = session.scene
+                if (placed) samples.forEach { it.show() }
+                coroutineScope {
+                    var placementStarted = placed
+                    while (true) {
+                        val state = device.state.value
+                        val head = state.devicePose.takeIf { state.trackingState == TrackingState.TRACKING }
+                        if (!placementStarted && head != null) {
+                            placementStarted = true
+                            launch {
+                                place(head)
+                                placed = true
+                            }
                         }
+                        for (sample in samples) {
+                            val parentState = if (sample.kind.anchored) {
+                                anchorSpace?.let { "${it.state}/${anchor?.state?.value?.trackingState}" } ?: anchorStatus
+                            } else "ActivitySpace"
+                            val parentReady = !sample.kind.anchored ||
+                                anchorSpace?.state == AnchorSpace.State.ANCHORED &&
+                                anchor?.state?.value?.trackingState == TrackingState.TRACKING
+                            sample.log(scene.perceptionSpace, head.takeIf { parentReady }, parentState, state.trackingState)
+                        }
+                        delay(1_000)
                     }
                 }
-                for (sample in samples) {
-                    val parentState = if (sample.kind.anchored) {
-                        anchorSpace?.let { "${it.state}/${anchor?.state?.value?.trackingState}" } ?: anchorStatus
-                    } else "ActivitySpace"
-                    val parentReady = !sample.kind.anchored ||
-                        anchorSpace?.state == AnchorSpace.State.ANCHORED &&
-                        anchor?.state?.value?.trackingState == TrackingState.TRACKING
-                    sample.log(scene.perceptionSpace, head.takeIf { parentReady }, parentState, state.trackingState)
-                }
-                delay(1_000)
+            } finally {
+                if (lifecycle.currentState != Lifecycle.State.DESTROYED) samples.forEach { it.hide() }
             }
         }
     } finally {
-        samples.forEach { it.close() }
-        anchor?.detach()
+        if (lifecycle.canRemoveSpatialEntities(session.context)) {
+            samples.forEach { it.removeFromScene() }
+            anchor?.detach()
+        }
     }
 }
 
@@ -160,20 +175,24 @@ private enum class Sample(val label: String, val anchored: Boolean, val isMesh: 
     }
 }
 
-private class DiagnosisEntity(val kind: Sample) : AutoCloseable {
+private class DiagnosisEntity(val kind: Sample) {
     var creation = "WAITING_FOR_HEAD"
     private var entity: Entity? = null
     private var mesh: SpatialMarkMesh? = null
 
     suspend fun create(session: Session, parent: Entity, localPose: Result<Pose>) {
+        if (entity != null) {
+            show()
+            return
+        }
         creation = "PENDING"
         creation = xrResult {
             val pose = localPose.getOrThrow()
             if (kind.isMesh) {
-                val renderer = SpatialMarkMesh(listOf(4))
-                mesh = renderer
+                val outline = squareOutline()
+                val renderer = mesh ?: SpatialMarkMesh(listOf(outline.size)).also { mesh = it }
                 entity = renderer.initialize(session, parent, pose)
-                renderer.draw(listOf(squareOutline()), listOf(Color(0xFF7FDBFF)), 1f)
+                renderer.draw(listOf(outline), listOf(Color(0xFF7FDBFF)), 1f)
             } else {
                 entity = PanelEntity.create(
                     session, DiagnosisLetter(session.context, kind.label.take(1)), FloatSize2d(0.6f, 0.6f),
@@ -184,7 +203,7 @@ private class DiagnosisEntity(val kind: Sample) : AutoCloseable {
             entity?.setScale(spatialTestDistanceMeters / BASE_DISTANCE_METERS)
             "CREATED distance=${spatialTestDistanceMeters}"
         }.getOrElse {
-            close()
+            removeFromScene()
             "FAILED:${it.javaClass.simpleName}"
         }
     }
@@ -207,12 +226,18 @@ private class DiagnosisEntity(val kind: Sample) : AutoCloseable {
         )
     }
 
-    override fun close() {
-        if (kind.isMesh) mesh?.close()
-        else entity?.let {
-            it.setEnabled(false)
-            it.parent = null
-        }
+    fun show() {
+        entity?.setEnabled(true)
+    }
+
+    fun hide() {
+        if (kind.isMesh) mesh?.hide()
+        else entity?.hideSpatialEntity()
+    }
+
+    fun removeFromScene() {
+        if (kind.isMesh) mesh?.removeFromScene()
+        else entity?.hideSpatialEntity(detach = true)
         entity = null
         mesh = null
     }
