@@ -4,6 +4,7 @@ import io.github.yamichi77.aurawalkinfo.heading.HeadingAxes
 import io.github.yamichi77.aurawalkinfo.heading.NorthEstimate
 import io.github.yamichi77.aurawalkinfo.nav.NavPoint
 import io.github.yamichi77.aurawalkinfo.nav.NavState
+import io.github.yamichi77.aurawalkinfo.nav.NavStep
 import io.github.yamichi77.aurawalkinfo.nav.bearingTo
 import io.github.yamichi77.aurawalkinfo.nav.distanceTo
 import io.github.yamichi77.aurawalkinfo.pics.PicsCandidate
@@ -59,19 +60,24 @@ private fun directionInPerception(bearing: Double, northOffset: Double): MarkVec
     return MarkVector(HeadingAxes.RIGHT_X * sin(angle), 0.0, HeadingAxes.FORWARD_Z * cos(angle))
 }
 
-internal enum class MarkKind(val baseHeight: Double, val strokeCounts: List<Int>) {
-    TURN(7.0, listOf(21)),
-    DESTINATION(8.0, listOf(17)),
-    SIGNAL(SIGNAL_HEIGHT_METERS, emptyList()),
+internal enum class MarkKind(val baseHeight: Double) {
+    TURN(GpsSpatialProjector.EYE_HEIGHT_METERS + 0.6),
+    DESTINATION(8.0),
+    SIGNAL(SIGNAL_HEIGHT_METERS),
 }
 
 internal enum class MarkReason {
     SHOW, FAST, DISABLED, TRACKING_LOST, NO_NORTH, UNCERTAIN, NO_FIX, GPS_ACCURACY,
-    NO_GUIDANCE, NO_TURN, TURN_TOO_CLOSE, OUTGOING_UNKNOWN, DESTINATION_TOO_FAR,
+    NO_GUIDANCE, NO_TURN, OUTGOING_UNKNOWN, DESTINATION_TOO_FAR,
     NO_SIGNAL, BELOW_ELEVATION, ANCHOR_UNAVAILABLE, RENDER_UNAVAILABLE,
 }
 
-internal data class MarkTarget(val point: NavPoint, val bearing: Double? = null, val signal: PicsCandidate? = null)
+internal data class MarkTarget(
+    val point: NavPoint,
+    val bearing: Double? = null,
+    val signal: PicsCandidate? = null,
+    val turnStep: NavStep? = null,
+)
 internal data class MarkDecision(val reason: MarkReason, val target: MarkTarget? = null)
 
 internal fun spatialBlocker(
@@ -108,9 +114,8 @@ internal fun decideMark(
         MarkKind.TURN -> {
             val turn = (guiding ?: return MarkDecision(MarkReason.NO_GUIDANCE)).guidance.nextTurn
                 ?: return MarkDecision(MarkReason.NO_TURN)
-            if (turnTooClose(current.distanceTo(turn.step.start))) return MarkDecision(MarkReason.TURN_TOO_CLOSE)
             val bearing = turn.step.outgoingBearing() ?: return MarkDecision(MarkReason.OUTGOING_UNKNOWN)
-            MarkDecision(MarkReason.SHOW, MarkTarget(turn.step.start, bearing))
+            MarkDecision(MarkReason.SHOW, MarkTarget(turn.step.start, bearing, turnStep = turn.step))
         }
         MarkKind.DESTINATION -> {
             val destination = (guiding ?: return MarkDecision(MarkReason.NO_GUIDANCE)).destination.point
@@ -126,7 +131,6 @@ internal fun decideMark(
     }
 }
 
-internal fun turnTooClose(distanceMeters: Double) = distanceMeters <= 15.0
 internal fun destinationTooFar(distanceMeters: Double) = distanceMeters > 150.0
 
 internal fun markForward(target: MarkTarget, northOffset: Double) =
@@ -177,7 +181,7 @@ internal class SmoothedMarkPosition(initial: MarkVector) {
     }
 }
 
-internal class MarkFade {
+internal class MarkFade(private val maxOpacity: Float = MARK_MAX_OPACITY) {
     private var shown = false
     private var from = 0f
     private var startedAt = 0L
@@ -193,20 +197,27 @@ internal class MarkFade {
             startedAt = now
             shown = show
         }
-        isAnimating = from != (if (shown) MARK_MAX_OPACITY else 0f) && now - startedAt < MARK_FADE_MS
+        isAnimating = from != (if (shown) maxOpacity else 0f) && now - startedAt < MARK_FADE_MS
         return value(now)
     }
 
     private fun value(now: Long): Float {
         val fraction = ((now - startedAt).toFloat() / MARK_FADE_MS).coerceIn(0f, 1f)
-        return from + ((if (shown) MARK_MAX_OPACITY else 0f) - from) * fraction
+        return from + ((if (shown) maxOpacity else 0f) - from) * fraction
     }
 }
 
 internal const val MIN_MARK_ELEVATION_DEGREES = 5.0
-private val MIN_ELEVATION_SLOPE = tan(Math.toRadians(MIN_MARK_ELEVATION_DEGREES))
 
-internal data class MarkView(val eye: MarkVector, val up: MarkVector) {
+internal fun MarkView.forKind(kind: MarkKind) =
+    if (kind == MarkKind.TURN) copy(minimumElevationDegrees = 0.0) else this
+
+internal data class MarkView(
+    val eye: MarkVector,
+    val up: MarkVector,
+    val minimumElevationDegrees: Double = MIN_MARK_ELEVATION_DEGREES,
+) {
+    private val minimumElevationSlope = tan(Math.toRadians(minimumElevationDegrees))
     private fun horizontal(delta: MarkVector, rise: Double) = sqrt((delta.dot(delta) - rise * rise).coerceAtLeast(0.0))
 
     fun elevation(point: MarkVector): Double {
@@ -218,6 +229,6 @@ internal data class MarkView(val eye: MarkVector, val up: MarkVector) {
     fun margin(point: MarkVector): Double {
         val delta = point - eye
         val rise = delta.dot(up)
-        return rise - horizontal(delta, rise) * MIN_ELEVATION_SLOPE
+        return rise - horizontal(delta, rise) * minimumElevationSlope
     }
 }

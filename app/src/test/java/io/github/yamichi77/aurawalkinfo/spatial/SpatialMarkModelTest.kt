@@ -21,7 +21,9 @@ import io.github.yamichi77.aurawalkinfo.safety.MotionState
 import io.github.yamichi77.aurawalkinfo.session.Clock
 import io.github.yamichi77.aurawalkinfo.session.MapCenter
 import java.time.Duration
+import kotlin.math.acos
 import kotlin.math.atan
+import kotlin.math.cos
 import kotlin.math.tan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -39,16 +41,18 @@ class SpatialMarkModelTest {
     private val fix = SpatialFix(origin, eye, 0.0)
 
     @Test fun cardinalDirectionsUseTheHeadingAxesAndFixHeight() {
-        val up = MarkVector.UP * 5.4
+        val up = MarkVector.UP * 0.6
+        val height = MarkKind.TURN.baseHeight
+        assertEquals(2.2, height, 1e-9)
         listOf(
             geo(north = 25.0) to north,
             geo(east = 25.0) to east,
             geo(north = -25.0) to north * -1.0,
             geo(east = -25.0) to east * -1.0,
         ).forEach { (point, direction) ->
-            assertVector(eye + direction * 25.0 + up, GpsSpatialProjector.project(fix, point, 7.0))
+            assertVector(eye + direction * 25.0 + up, GpsSpatialProjector.project(fix, point, height))
         }
-        assertVector(eye + east * -25.0 + up, GpsSpatialProjector.project(fix.copy(northOffsetDegrees = 90.0), geo(north = 25.0), 7.0))
+        assertVector(eye + east * -25.0 + up, GpsSpatialProjector.project(fix.copy(northOffsetDegrees = 90.0), geo(north = 25.0), height))
         assertVector(eye + MarkVector.UP * -1.6, GpsSpatialProjector.project(fix, origin, 0.0))
     }
 
@@ -96,48 +100,85 @@ class SpatialMarkModelTest {
         assertVector(east * 3.0, position.at(2_750))
     }
 
-    @Test fun elevationClipsActualStrokeVerticesAndKeepsTheBoundary() {
-        val view = MarkView(zero, MarkVector.UP)
-        val lower = MarkVector(0.0, 6.4, -150.0)
-        val upper = lower.copy(y = 38.4)
-        val (first, last) = checkNotNull(view.clip(lower, upper))
-        assertEquals(5.0, view.elevation(first), 1e-5)
-        assertVector(upper, last)
-        assertNull(view.clip(lower, lower + east))
-        val boundary = MarkVector(0.0, 20 * tan(Math.toRadians(5.0)), -20.0)
-        assertNotNull(view.clip(boundary, boundary + MarkVector.UP))
-        val triangles = MarkStroke(lower, upper, 0.3).clippedTriangles(view, MarkVector.UP, east)
-        assertTrue(triangles.isNotEmpty())
-        assertTrue(triangles.all { view.elevation(it) >= 5.0 })
-        assertTrue(triangles.any { view.elevation(it) in 5.0..5.01 })
-        assertEquals(38.4, triangles.maxOf { it.y }, 1e-6)
+    @Test fun arrowAndPillarClipActualDotVerticesAtTheirElevationLimits() {
+        val baseView = MarkView(zero, MarkVector.UP)
+        for ((kind, limit) in listOf(MarkKind.TURN to 0.0, MarkKind.DESTINATION to 5.0)) {
+            val view = baseView.forKind(kind)
+            val boundary = MarkVector(0.0, 20 * tan(Math.toRadians(limit)), -20.0)
+            val layers = dotTriangles(listOf(boundary), view)
+            val points = layers.flatten()
+            assertTrue(layers.all { it.isNotEmpty() })
+            assertTrue(points.all { view.elevation(it) > limit })
+            assertTrue(points.any { view.elevation(it) < limit + 0.01 })
+            assertTrue(dotTriangles(listOf(boundary - MarkVector.UP), view).all { it.isEmpty() })
+        }
+        val low = MarkVector(0.0, 0.6, -20.0)
+        assertTrue(dotTriangles(listOf(low), baseView.forKind(MarkKind.TURN)).first().isNotEmpty())
+        assertTrue(dotTriangles(listOf(low), baseView.forKind(MarkKind.DESTINATION)).all { it.isEmpty() })
     }
 
-    @Test fun strokeThicknessAndArrowSizeMeetAngularMinimumsAcrossDistances() {
-        fun angle(size: Double, distance: Double) = Math.toDegrees(2.0 * atan(size / (2.0 * distance)))
-        for (distance in listOf(10.0, 40.0, 100.0)) {
-            val center = eye + north * distance
-            val arrow = markStrokes(MarkKind.TURN, center, north, MarkVector.UP, eye)
-            val pillar = markStrokes(MarkKind.DESTINATION, center, north, MarkVector.UP, eye)
-            for (stroke in arrow + pillar) {
-                val far = maxOf((stroke.start - eye).length(), (stroke.end - eye).length())
-                assertTrue("Stroke at ${distance}m", angle(stroke.width, far) >= MIN_STROKE_ANGLE_DEGREES - 1e-9)
+    @Test fun nearArrowCapsItsRenderedAngleAndOpacityIncludingGlow() {
+        assertFalse(isNearTurn(10.001))
+        assertEquals(1f, arrowOpacity(isNearTurn(10.001)), 0f)
+        for (distance in listOf(0.0, 0.1, 1.0, 5.0, 10.0)) {
+            val near = isNearTurn(distance)
+            assertTrue(near)
+            assertEquals(0.5f, arrowOpacity(near), 0f)
+            val center = MarkVector.UP * 0.6 + north * distance
+            val view = MarkView(zero, MarkVector.UP).forKind(MarkKind.TURN)
+            for (direction in listOf(north, east, north * -1.0)) {
+                val points = dotTriangles(markDots(MarkKind.TURN, center, direction, view, 500, near), view).flatten()
+                assertTrue(points.isNotEmpty())
+                assertTrue(points.all { point ->
+                    val cosine = point.dot(center) / (point.length() * center.length())
+                    Math.toDegrees(acos(cosine.coerceIn(-1.0, 1.0))) <= MAX_NEAR_ARROW_ANGLE_DEGREES / 2
+                })
             }
-            val arrowPoints = arrow.map { it.start }
-            val width = arrowPoints.maxOf { it.x } - arrowPoints.minOf { it.x }
-            val far = arrowPoints.maxOf { (it - eye).length() }
-            assertTrue("Arrow at ${distance}m", angle(width, far) >= MIN_ARROW_ANGLE_DEGREES - 1e-9)
         }
     }
 
-    @Test fun segmentCanEnterAndLeaveTheVisibleConeWithBothEndsBelowFiveDegrees() {
+    @Test fun dotsAndArrowOutlineKeepTheirAngularMinimumsAcrossDistances() {
+        fun angle(size: Double, distance: Double) = Math.toDegrees(2.0 * atan(size / (2.0 * distance)))
+        for (distance in listOf(10.0, 40.0, 100.0, 150.0)) {
+            val diameterAcrossFlats = 2 * dotRadius(distance) * cos(Math.PI / 6)
+            assertEquals(MIN_DOT_ANGLE_DEGREES, angle(diameterAcrossFlats, distance), 1e-9)
+
+            val scale = arrowScale(distance, isNearTurn(distance))
+            assertTrue(angle(2 * scale, distance + 1.25 * scale) >= MIN_ARROW_ANGLE_DEGREES - 1e-9)
+        }
+    }
+
+    @Test fun dotCountFitsTheMeshAndFlowMovesOneMeterPerSecondAndWraps() {
+        val path = listOf(zero, MarkVector.UP * 4.0)
+        val initial = flowingDots(path, 2, 0)
+        assertEquals(initial.map { it + MarkVector.UP }, flowingDots(path, 2, 1_000))
+        assertEquals(initial, flowingDots(path, 2, 2_000))
+
         val view = MarkView(zero, MarkVector.UP)
-        val start = MarkVector(-40.0, 1.0, -10.0)
-        val end = start.copy(x = 40.0)
-        val (first, last) = checkNotNull(view.clip(start, end))
-        assertTrue(first.x < 0 && last.x > 0)
-        assertEquals(5.0, view.elevation(first), 1e-5)
-        assertEquals(5.0, view.elevation(last), 1e-5)
+        for (kind in listOf(MarkKind.TURN, MarkKind.DESTINATION)) {
+            val center = north * 25.0 + MarkVector.UP * (kind.baseHeight - GpsSpatialProjector.EYE_HEIGHT_METERS)
+            val markView = view.forKind(kind)
+            val dots = markDots(kind, center, east, markView, 0)
+            val moved = markDots(kind, center, east, markView, 100)
+            assertTrue(dots.size in 1..MAX_MARK_DOTS)
+            assertEquals(dots.size, moved.size)
+            assertTrue(dots.first() != moved.first())
+            val layers = dotTriangles(moved, markView)
+            assertTrue(layers.zip(markDotVertexCapacities(kind)).all { (vertices, capacity) ->
+                vertices.size in 1..capacity
+            })
+        }
+    }
+
+    @Test fun endingHidesEntitiesAndLiveRemovalAlsoDetachesFromTheSceneGraph() {
+        val calls = mutableListOf<String>()
+        val disable = { calls += "disable" }
+        val detachFromScene = { calls += "detach" }
+        hideSpatialEntity(detach = false, disable, detachFromScene)
+        assertEquals(listOf("disable"), calls)
+        calls.clear()
+        hideSpatialEntity(detach = true, disable, detachFromScene)
+        assertEquals(listOf("disable", "detach"), calls)
     }
 
     @Test fun safetyGatesUseInclusiveAccuracyAndUncertaintyLimits() {
@@ -162,8 +203,6 @@ class SpatialMarkModelTest {
     }
 
     @Test fun navigationUsesGeographicDistanceAndTheRoadAfterTheTurn() {
-        assertTrue(turnTooClose(15.0))
-        assertFalse(turnTooClose(15.001))
         assertFalse(destinationTooFar(150.0))
         assertTrue(destinationTooFar(150.001))
 
@@ -176,12 +215,18 @@ class SpatialMarkModelTest {
                 NavStep(corner, destination, 120, listOf(corner, corner, destination), "TURN_RIGHT", ""),
             ),
         )
-        val guide = GuidanceCalculator(route, destination).update(origin)
+        val calculator = GuidanceCalculator(route, destination)
+        val guide = calculator.update(origin)
         val active = NavState.Guiding(NavDestination(destination), route, guide)
         val arrow = decideMark(MarkKind.TURN, origin, active, null, MotionState.WALKING)
         assertEquals(corner, arrow.target?.point)
         assertEquals(90.0, checkNotNull(arrow.target?.bearing), 0.01)
-        assertEquals(MarkReason.TURN_TOO_CLOSE, decideMark(MarkKind.TURN, geo(north = 16.0), active, null, MotionState.WALKING).reason)
+        val justBefore = geo(north = 29.0)
+        val approaching = active.copy(guidance = calculator.update(justBefore))
+        assertEquals(arrow, decideMark(MarkKind.TURN, justBefore, approaching, null, MotionState.WALKING))
+        val justAfter = geo(north = 30.0, east = 1.0)
+        val passed = active.copy(guidance = calculator.update(justAfter))
+        assertEquals(MarkReason.NO_TURN, decideMark(MarkKind.TURN, justAfter, passed, null, MotionState.WALKING).reason)
         assertEquals(MarkReason.DESTINATION_TOO_FAR, decideMark(MarkKind.DESTINATION, geo(east = -40.0), active, null, MotionState.WALKING).reason)
         assertEquals(MarkReason.SHOW, decideMark(MarkKind.DESTINATION, origin, active, null, MotionState.WALKING).reason)
         assertEquals(MarkReason.NO_GUIDANCE, decideMark(MarkKind.TURN, origin, NavState.Idle, null, MotionState.WALKING).reason)

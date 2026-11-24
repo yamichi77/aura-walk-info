@@ -20,14 +20,29 @@ class HeadingEstimatorTest {
     }
 
     @Test
-    fun requiresTwentySamplesAtLeastOneSecondApart() {
+    fun startsAtEightSamplesAtLeastOneSecondApart() {
         val walk = Walk()
-        repeat(37) { walk.sample(interval = 500) }
+        repeat(13) { walk.sample(interval = 500) }
         assertNull(walk.estimate())
         walk.sample(interval = 500)
         assertNull(walk.estimate())
         walk.sample(interval = 500)
-        assertAngle(37.0, checkNotNull(walk.estimate()).offsetDegrees)
+        val estimate = checkNotNull(walk.estimate())
+        assertAngle(37.0, estimate.offsetDegrees)
+        assertEquals(12.0, estimate.uncertaintyDegrees, 1e-6)
+    }
+
+    @Test
+    fun requiresTwentyRetainedSamplesForTheEightDegreeFloor() {
+        val walk = Walk()
+        repeat(19) { index ->
+            walk.sample()
+            if (index >= 7) assertEquals(12.0, checkNotNull(walk.estimate()).uncertaintyDegrees, 1e-6)
+        }
+        walk.sample(bearing = 97.0)
+        assertEquals(12.0, checkNotNull(walk.estimate()).uncertaintyDegrees, 1e-6)
+        walk.sample()
+        assertEquals(8.0, checkNotNull(walk.estimate()).uncertaintyDegrees, 1e-6)
     }
 
     @Test
@@ -50,16 +65,16 @@ class HeadingEstimatorTest {
         assertNull(turning.estimate())
 
         val walk = Walk()
-        repeat(21) { i -> walk.sample(if (i % 2 == 0) 359.0 else 1.0, bearingAccuracy = null) }
+        repeat(9) { i -> walk.sample(if (i % 2 == 0) 359.0 else 1.0, bearingAccuracy = null) }
         assertNull(walk.estimate())
         walk.sample(1.0, bearingAccuracy = null)
         assertAngle(0.0, checkNotNull(walk.estimate()).offsetDegrees, 0.2)
     }
 
     @Test
-    fun requiresTwentySamplesAfterRejectingOutliers() {
+    fun requiresEightSamplesAfterRejectingOutliers() {
         val walk = Walk()
-        repeat(19) { walk.sample() }
+        repeat(7) { walk.sample() }
         walk.sample(bearing = 97.0)
         assertNull(walk.estimate())
         walk.sample()
@@ -107,7 +122,7 @@ class HeadingEstimatorTest {
         repeat(20) { walk.sample() }
         walk.estimator.onPose(HeadPose(walk.time, HeadTracking.PAUSED))
         assertNull(walk.estimate())
-        repeat(19) { walk.sample(80.0) }
+        repeat(7) { walk.sample(80.0) }
         assertNull(walk.estimate())
         walk.sample(80.0)
         assertAngle(80.0, checkNotNull(walk.estimate()).offsetDegrees)

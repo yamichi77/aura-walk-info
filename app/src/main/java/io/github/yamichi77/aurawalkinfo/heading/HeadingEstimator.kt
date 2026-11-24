@@ -123,7 +123,8 @@ internal class HeadingEstimator {
         if (retained.size < MIN_SAMPLES) return
         val (offset, deviation) = circularStats(retained.map { it.degrees })
         // Consecutive samples are correlated, so use an effective sample size of one fifth.
-        val uncertainty = (deviation / sqrt(retained.size / 5.0)).coerceAtLeast(8.0)
+        val floor = if (retained.size < FULL_CONFIDENCE_SAMPLES) 12.0 else 8.0
+        val uncertainty = (deviation / sqrt(retained.size / 5.0)).coerceAtLeast(floor)
         north = NorthEstimate(offset, uncertainty)
     }
 
@@ -132,7 +133,8 @@ internal class HeadingEstimator {
         private const val POSE_HISTORY_MS = 1_350L
         private const val BEARING_WINDOW_MS = 3_000L
         private const val SAMPLE_INTERVAL_MS = 1_000L
-        private const val MIN_SAMPLES = 20
+        private const val MIN_SAMPLES = 8
+        private const val FULL_CONFIDENCE_SAMPLES = 20
         private const val RECENT_SAMPLES = 120
     }
 }
