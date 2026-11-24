@@ -191,16 +191,15 @@ class WalkSessionRepository internal constructor(
                     distance.update(MotionState.NO_FIX)
                 }
                 latest = sample
+                motion = classifier.onLocation(sample, now)
                 if (input.heading != null) {
                     val headingFix = HeadingFix(
                         sample.elapsedRealtimeMillis, sample.bearingDeg?.toDouble(),
                         sample.bearingAccuracyDeg?.toDouble(), sample.speedMps?.toDouble(),
-                        sample.accuracyMeters.toDouble(),
                     )
-                    input.heading.onFix(headingFix)
+                    input.heading.onFix(headingFix, walking = motion == MotionState.WALKING)
                     if (start != null && headingFix.timeMillis >= start) intervalHeadingFix = headingFix
                 }
-                motion = classifier.onLocation(sample, now)
                 if (classifier.latestSpeedMps?.let { it >= MotionThresholds.WALKING_MPS } == true) {
                     bearing = sample.bearingDeg ?: bearing
                 }

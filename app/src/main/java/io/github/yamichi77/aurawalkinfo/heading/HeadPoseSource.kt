@@ -94,13 +94,10 @@ internal class HeadingTracking {
         estimator.onPose(pose)
     }
 
-    fun onFix(fix: HeadingFix) {
+    fun onFix(fix: HeadingFix, walking: Boolean) {
         fixTime = fix.timeMillis
-        fixPose = latestPose.value?.takeIf {
-            it.tracking == HeadTracking.TRACKING &&
-                kotlin.math.abs(it.timeMillis - fix.timeMillis) <= HeadingEstimator.MAX_POSE_GAP_MS
-        }
-        estimator.onFix(fix)
+        fixPose = estimator.trackedPoseNear(fix.timeMillis)
+        estimator.onFix(fix, walking)
     }
 
     fun poseForFix(timeMillis: Long?): HeadPose? = fixPose.takeIf { timeMillis == fixTime }
