@@ -147,6 +147,9 @@ class QuantumHudTest {
         settle()
         tag("map").performClick()
         frames()
+        // The gathering waits until frames flow again after the big map is built.
+        tag("quantum-bigmap").assertDoesNotExist()
+        openFrames()
         effect("bigmap")
         compose.mainClock.advanceTimeBy(QuantumTransitionMillis + 1_100L)
         noEffects()
@@ -197,6 +200,7 @@ class QuantumHudTest {
         settle()
         tag("map").performClick()
         frames()
+        openFrames()
         for (button in listOf("nav_destination", "bigmap_mode")) {
             effect("$button-gather")
             tag("quantum-$button-orbit").assertDoesNotExist()
@@ -377,6 +381,11 @@ class QuantumHudTest {
         compose.waitForIdle()
     }
     private fun settle() = compose.mainClock.advanceTimeBy(900)
+    /** Frames for [QuantumFrameSettle] to see smooth frames before the big map gathers. */
+    private fun openFrames() {
+        compose.mainClock.advanceTimeBy(48)
+        compose.waitForIdle()
+    }
     private fun tag(name: String) = compose.onNodeWithTag(name, useUnmergedTree = true)
     private fun animatedTime(time: String) =
         compose.onNode(hasText(time) and hasTestTag("quantum-label"), useUnmergedTree = true)

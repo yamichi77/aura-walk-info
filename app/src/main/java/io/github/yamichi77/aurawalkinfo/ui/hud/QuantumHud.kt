@@ -1,6 +1,8 @@
 package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import android.graphics.Matrix
+import android.os.SystemClock
+import android.util.Log
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -19,6 +21,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
@@ -45,6 +48,38 @@ internal const val QuantumRimFlashMillis = 200
 private const val FadeStart = 0.7f
 
 internal enum class QuantumEffect { Startup, Walk, OpenMap, CloseMap, Candidates }
+
+/**
+ * Decides when frames flow again after a heavy composition: [SettledFrames] frames in a row no longer
+ * than [SettledFrameMillis] apart, or [TimeoutMillis] after the first frame at the latest.
+ */
+internal class QuantumFrameSettle {
+    private var firstNanos = -1L
+    private var lastNanos = -1L
+    private var smoothFrames = 0
+    var waitedMillis = 0L
+        private set
+
+    /** Feed each frame time. Returns true once the frames have settled or the wait timed out. */
+    fun onFrame(frameNanos: Long): Boolean {
+        if (firstNanos < 0) {
+            firstNanos = frameNanos
+            lastNanos = frameNanos
+            return false
+        }
+        val interval = (frameNanos - lastNanos) / 1_000_000
+        lastNanos = frameNanos
+        smoothFrames = if (interval <= SettledFrameMillis) smoothFrames + 1 else 0
+        waitedMillis = (frameNanos - firstNanos) / 1_000_000
+        return smoothFrames >= SettledFrames || waitedMillis >= TimeoutMillis
+    }
+
+    companion object {
+        const val SettledFrames = 3
+        const val SettledFrameMillis = 25L
+        const val TimeoutMillis = 1_000L
+    }
+}
 
 internal class QuantumAnimation(val effect: QuantumEffect, private val progress: State<Float>) {
     val fraction: Float get() = progress.value
@@ -132,14 +167,29 @@ internal fun rememberHudQuantum(
 @Composable
 internal fun rememberQuantumAnimation(effect: QuantumEffect?, waitForRipple: Boolean = false): QuantumAnimation? {
     if (effect == null) return null
-    val progress = remember(effect) { mutableFloatStateOf(if (waitForRipple) -1f else 0f) }
+    // Opening the big map builds the map view and its panels on the main thread (about 0.35 s on AURA,
+    // 0.45 s the first time). Wait for frames to flow again so the stall does not eat the gathering.
+    val settleFirst = effect == QuantumEffect.OpenMap
+    val progress = remember(effect) { mutableFloatStateOf(if (waitForRipple || settleFirst) -1f else 0f) }
     var finished by remember(effect) { mutableStateOf(false) }
     LaunchedEffect(effect, waitForRipple) {
         if (!waitForRipple && !finished) {
+            if (settleFirst && progress.floatValue < 0f) {
+                val settle = QuantumFrameSettle()
+                while (!settle.onFrame(withFrameNanos { it })) Unit
+                Log.i("AuraQuantum", "${effect.name} settled waitMillis=${settle.waitedMillis}")
+            }
             val duration = QuantumTransitionMillis + if (effect == QuantumEffect.OpenMap) QuantumRimFlashMillis else 0
+            var lastFrame = -1L
+            var longestFrame = 0L
             animate(0f, duration.toFloat(), animationSpec = tween(duration, easing = LinearEasing)) { value, _ ->
                 progress.floatValue = value / QuantumTransitionMillis
+                val now = SystemClock.uptimeMillis()
+                if (lastFrame >= 0) longestFrame = maxOf(longestFrame, now - lastFrame)
+                lastFrame = now
             }
+            // The longest gap between animation frames shows whether the effect itself stuttered.
+            if (settleFirst) Log.i("AuraQuantum", "${effect.name} done longestFrameMillis=$longestFrame")
             finished = true
         }
     }
