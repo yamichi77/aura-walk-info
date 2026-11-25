@@ -23,6 +23,7 @@ import androidx.xr.runtime.Session
 import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.AnchorSpace
+import io.github.yamichi77.aurawalkinfo.diagnostics.HudFrameStats
 import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
 import io.github.yamichi77.aurawalkinfo.geospatial.VpsFix
 import io.github.yamichi77.aurawalkinfo.heading.HeadingEstimator
@@ -51,6 +52,7 @@ internal fun SpatialMarks(
     anchorGranted: Boolean,
     locationDenied: Boolean,
     debug: Boolean,
+    frameStats: HudFrameStats?,
 ) {
     val session = LocalSession.current
     val context = LocalContext.current
@@ -66,10 +68,10 @@ internal fun SpatialMarks(
     val fix by rememberUpdatedState(current)
     val walk by rememberUpdatedState(state)
     val hasTargets by rememberUpdatedState(nav is NavState.Guiding || nav is NavState.Rerouting || signal != null)
-    LaunchedEffect(session, context, owner, settings, heading, anchorGranted, debug) {
+    LaunchedEffect(session, context, owner, settings, heading, anchorGranted, debug, frameStats) {
         if (session == null) return@LaunchedEffect
         // Keep renderers across pauses. ON_PAUSE also precedes Session's ON_DESTROY cleanup.
-        val scene = SpatialMarkScene(session, context, debug)
+        val scene = SpatialMarkScene(session, context, debug, frameStats)
         try {
             owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 if (debug) launch {
@@ -145,13 +147,21 @@ internal fun SpatialMarks(
                                         reason = when {
                                             !anchorGranted -> MarkReason.ANCHOR_UNAVAILABLE
                                             vps == null && fallbackReason != null -> fallbackReason
-                                            now < nextPositionAt && wasVps == (vps != null) -> placementFailure
                                             else -> {
-                                                nextPositionAt = now + MARK_POSITION_INTERVAL_MS
-                                                wasVps = vps != null
-                                                scene.position(
-                                                    checkNotNull(eye), gpsFix, vps, fallbackReason, targets, now,
-                                                ).also { placementFailure = it }
+                                                val preparationFailure = scene.prepare(checkNotNull(eye))
+                                                when {
+                                                    preparationFailure != null -> {
+                                                        nextPositionAt = 0L
+                                                        preparationFailure
+                                                    }
+                                                    now < nextPositionAt && wasVps == (vps != null) -> placementFailure
+                                                    else -> {
+                                                        nextPositionAt = now + MARK_POSITION_INTERVAL_MS
+                                                        wasVps = vps != null
+                                                        scene.position(eye, gpsFix, vps, fallbackReason, targets, now)
+                                                            .also { placementFailure = it }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -185,12 +195,13 @@ private class SpatialMarkScene(
     private val session: Session,
     private val context: Context,
     private val debug: Boolean,
+    private val frameStats: HudFrameStats?,
 ) {
     private val marks = MarkKind.entries.map(::SceneMark)
     private var anchor: Anchor? = null
     private var anchorSpace: AnchorSpace? = null
     private var anchorFailure = false
-    private var prepared = false
+    private var nextPanel = 0
     private var lastVpsProjection: Boolean? = null
     val isFading get() = marks.any { it.isFading }
     val hasVisibleOrFadingMarks get() = marks.any { it.opacity > 0f || it.isFading }
@@ -199,10 +210,7 @@ private class SpatialMarkScene(
         anchor?.state?.value?.takeIf { it.trackingState == TrackingState.TRACKING && anchorSpace?.state == AnchorSpace.State.ANCHORED }
             ?.pose
 
-    suspend fun position(
-        eye: Vector3, gpsFix: SpatialFix?, vps: VpsFix?, fallbackReason: MarkReason?,
-        decisions: List<MarkDecision>, now: Long,
-    ): MarkReason? {
+    suspend fun prepare(eye: Vector3): MarkReason? {
         if (anchorFailure) return MarkReason.ANCHOR_UNAVAILABLE
         if (anchor?.state?.value?.trackingState == TrackingState.STOPPED) {
             removeFromScene()
@@ -214,17 +222,24 @@ private class SpatialMarkScene(
             anchorSpace = AnchorSpace.create(session, result.anchor)
             if (anchorSpace?.state == AnchorSpace.State.ERROR) {
                 anchorFailure = true
-                return MarkReason.ANCHOR_UNAVAILABLE
             }
-        }
-        val fromPerception = anchorPose()?.inverse ?: return MarkReason.ANCHOR_UNAVAILABLE
-        if (!prepared) {
-            val parent = checkNotNull(anchorSpace)
-            marks.forEach { it.prepare(session, context, parent) }
-            prepared = true
-            // Recheck safety inputs on the next tick after creating the anchor.
+            // Recheck the safety inputs on the next update before creating the first panel.
             return MarkReason.ANCHOR_UNAVAILABLE
         }
+        if (anchorPose() == null) return MarkReason.ANCHOR_UNAVAILABLE
+        if (nextPanel < marks.size) {
+            // One panel per update. Already prepared marks can start their fade-in.
+            marks[nextPanel].prepare(session, context, checkNotNull(anchorSpace), debug)
+            nextPanel++
+        }
+        return null
+    }
+
+    fun position(
+        eye: Vector3, gpsFix: SpatialFix?, vps: VpsFix?, fallbackReason: MarkReason?,
+        decisions: List<MarkDecision>, now: Long,
+    ): MarkReason? {
+        val fromPerception = anchorPose()?.inverse ?: return MarkReason.ANCHOR_UNAVAILABLE
         val vpsPositions = vps?.let { fix ->
             marks.zip(decisions).map { (mark, decision) ->
                 val target = decision.target ?: return@map null
@@ -273,15 +288,18 @@ private class SpatialMarkScene(
 
     fun draw(reason: MarkReason?, decisions: List<MarkDecision>?, eye: Vector3?, current: NavPoint?, now: Long) {
         val view = if (eye == null) null else anchorPose()?.inverse?.markView(eye)
+        var visible = 0
         for ((index, mark) in marks.withIndex()) {
             val decision = decisions?.get(index)
             val why = reason ?: decision?.reason ?: MarkReason.NO_FIX
-            mark.draw(why, decision?.target, view, current, now, debug)
+            if (mark.draw(why, decision?.target, view, current, now, debug)) visible++
         }
+        frameStats?.visibleMarks = visible
     }
 
     fun hide() {
         marks.forEach { it.hide() }
+        frameStats?.visibleMarks = 0
     }
 
     fun removeFromScene() {
@@ -289,7 +307,8 @@ private class SpatialMarkScene(
         anchorSpace = null
         anchor?.detach()
         anchor = null
-        prepared = false
+        nextPanel = 0
+        frameStats?.visibleMarks = 0
     }
 }
 
@@ -313,11 +332,11 @@ private class SceneMark(val kind: MarkKind) {
 
     fun centerAt(now: Long): MarkVector? = position?.at(now)
 
-    fun prepare(session: Session, context: Context, parent: AnchorSpace) {
+    fun prepare(session: Session, context: Context, parent: AnchorSpace, debug: Boolean) {
         if (kind == MarkKind.SIGNAL) {
             signalPanel = SignalTotemPanel(session, context, parent)
         } else {
-            standingPanel = StandingMarkPanel(session, context, parent, kind)
+            standingPanel = StandingMarkPanel(session, context, parent, kind, debug)
         }
     }
 
@@ -341,17 +360,17 @@ private class SceneMark(val kind: MarkKind) {
         this.forward = forward
     }
 
-    fun draw(reason: MarkReason, requested: MarkTarget?, view: MarkView?, current: NavPoint?, now: Long, debug: Boolean) {
+    fun draw(reason: MarkReason, requested: MarkTarget?, view: MarkView?, current: NavPoint?, now: Long, debug: Boolean): Boolean {
         val center = position?.at(now)
         val stored = target
         val compatible = sameMark(stored, requested)
         if (kind == MarkKind.SIGNAL) {
-            drawSignal(reason, requested?.signal?.takeIf { compatible }, center, view, now, debug)
+            val visible = drawSignal(reason, requested?.signal?.takeIf { compatible }, center, view, now, debug)
             if (reason == MarkReason.FAST) {
                 target = null
                 position = null
             }
-            return
+            return visible
         }
         val usableView = view ?: lastView
         if (view != null) lastView = view
@@ -398,6 +417,7 @@ private class SceneMark(val kind: MarkKind) {
             destinationGround = null
             lastFacing = null
         }
+        return opacity > 0f && layout != null && usableView != null && standingPanel != null
     }
 
     private fun drawSignal(
@@ -407,7 +427,7 @@ private class SceneMark(val kind: MarkKind) {
         view: MarkView?,
         now: Long,
         debug: Boolean,
-    ) {
+    ): Boolean {
         val actual = when {
             reason != MarkReason.SHOW -> reason
             signal == null || center == null || view == null || signalPanel == null -> MarkReason.ANCHOR_UNAVAILABLE
@@ -434,6 +454,7 @@ private class SceneMark(val kind: MarkKind) {
             lastShownSignal = null
         }
         lastReason = actual
+        return opacity > 0f && signal != null && center != null && view != null && signalPanel != null
     }
 
     fun hide() {

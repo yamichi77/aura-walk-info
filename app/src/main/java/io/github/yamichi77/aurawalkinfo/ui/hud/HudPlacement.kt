@@ -33,14 +33,19 @@ internal object HudPlacement {
             Quaternion.fromAxisAngle(Vector3.Right, pitch)
 
     fun modifier(pose: Pose, dpPerMeter: Float, subspaceScale: Float): SubspaceModifier {
+        val position = translationInDp(pose.translation, dpPerMeter, subspaceScale)
+        return SubspaceModifier.offset(x = position.x.dp, y = position.y.dp, z = position.z.dp)
+            .rotate(pose.rotation)
+    }
+
+    fun translationInDp(position: Vector3, dpPerMeter: Float, subspaceScale: Float): Vector3 {
         // The SDK scales both its origin offset and the child offsets.
         val sdkDpPerMeter = dpPerMeter / subspaceScale
-        val position = pose.translation
-        return SubspaceModifier.offset(
-            x = (position.x * sdkDpPerMeter).dp,
-            y = (position.y * sdkDpPerMeter).dp,
-            z = (position.z * sdkDpPerMeter + viewOriginForwardMeters * dpPerMeter).dp,
-        ).rotate(pose.rotation)
+        return Vector3(
+            position.x * sdkDpPerMeter,
+            position.y * sdkDpPerMeter,
+            position.z * sdkDpPerMeter + viewOriginForwardMeters * dpPerMeter,
+        )
     }
 
     private fun radians(degrees: Float) = Math.toRadians(degrees.toDouble()).toFloat()

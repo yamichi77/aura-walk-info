@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -81,13 +82,58 @@ class SkyBandPanelTest {
     }
 
     @Test
+    fun turnAndEdgeReuseTheSamePanelSlotsAtTheExistingAngles() {
+        val targets = SkyBandTargets(skyTestGuidance(0.0, null), null)
+        fun frame(head: Double) = skyBandFrame(false, true, true, NorthEstimate(0.0, 5.0), head, targets)
+        val shown = mutableStateOf(frame(22.0))
+        val slots = mutableListOf<SkyBandSlot>()
+        compose.setContent {
+            Row {
+                SkyBandPanels(shown) { slot ->
+                    remember { slots.add(slot) }
+                    slot.mark.value?.let { SkyMarkContent(it, slot.alpha(), 20f, Modifier.size(64.dp)) }
+                }
+            }
+        }
+        val turn = compose.onNodeWithTag("sky-TURN")
+        val edge = compose.onNodeWithTag("sky-EDGE_LEFT")
+        val distance = compose.onNodeWithText("120m")
+        turn.assertIsDisplayed()
+        distance.assertIsDisplayed()
+        assertEquals(4, slots.size)
+        val turnSlot = slots.single { it.kind == SkyMarkKind.TURN }
+        val distanceSlot = slots.single { it.kind == SkyMarkKind.DISTANCE }
+        compose.runOnIdle {
+            assertEquals(HudPlacement.pose(-22f, 17.5f), turnSlot.pose())
+            assertEquals(HudPlacement.pose(-22f, 15f), distanceSlot.pose())
+            shown.value = frame(30.0)
+        }
+        edge.assertIsDisplayed()
+        turn.assertDoesNotExist()
+        distance.assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(HudPlacement.pose(-28f, 17.5f), turnSlot.pose())
+            assertNull(distanceSlot.mark.value)
+            shown.value = frame(26.0)
+        }
+        turn.assertIsDisplayed()
+        distance.assertIsDisplayed()
+        edge.assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(HudPlacement.pose(-26f, 17.5f), turnSlot.pose())
+            assertEquals(HudPlacement.pose(-26f, 15f), distanceSlot.pose())
+            assertEquals(4, slots.size)
+        }
+    }
+
+    @Test
     fun allHideGatesRemoveMarksAndFastSkipsTheFade() {
         compose.mainClock.autoAdvance = false
         val shown = SkyBandFrame(SkyBandStatus.SHOW, listOf(SkyMark(SkyMarkKind.TURN, 0f)))
         val frame = mutableStateOf(shown)
         compose.setContent {
             Box {
-                val band = rememberSkyBandVisibility(frame.value)
+                val band = rememberSkyBandVisibility(frame).value
                 band?.marks?.forEach { SkyMarkContent(it, band.alpha, 20f, Modifier.size(60.dp)) }
             }
         }

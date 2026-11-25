@@ -30,7 +30,9 @@ class StandingMarkArtworkTest {
         assertTrue(shadow.wasInvalidated())
 
         shadow.clearWasInvalidated()
-        repeat(10) { artwork.update((far as MarkArtwork.Arrow).copy()) }
+        val scaled = standingArrow(base * 0.5, view, facing, MarkVector(1.0, 0.0, 0.0), false).artwork
+        assertTrue(far.width != scaled.width)
+        artwork.update(scaled)
         assertFalse(shadow.wasInvalidated())
 
         artwork.update((far as MarkArtwork.Arrow).copy(near = true))
@@ -39,6 +41,41 @@ class StandingMarkArtworkTest {
 
         val smaller = standingArrow(base * 0.5, view, facing, MarkVector(-1.0, 0.0, 0.0), true).artwork
         artwork.update(smaller)
+        assertTrue(shadow.wasInvalidated())
+    }
+
+    @Test fun aSubpixelChangeInsideTheSameBucketDoesNotInvalidateButAChangedShapeDoes() {
+        val artwork = newArtwork()
+        val shadow = shadowOf(artwork)
+        val arrow = MarkArtwork.Arrow(
+            listOf(MarkPoint(0.5, 0.5), MarkPoint(0.5, 0.25)),
+            listOf(MarkPoint(0.25, 0.5), MarkPoint(0.5, 0.25), MarkPoint(0.75, 0.5)),
+            width = 1.0, height = 1.0, stroke = 0.0625, near = false,
+        )
+        fun moved(pixels: Double) = arrow.copy(shaft = listOf(MarkPoint(0.5 + pixels / 1024, 0.5), arrow.shaft.last()))
+        artwork.update(arrow)
+        shadow.clearWasInvalidated()
+        artwork.update(moved(0.1))
+        assertFalse(shadow.wasInvalidated())
+        artwork.update(moved(1.0))
+        assertTrue(shadow.wasInvalidated())
+    }
+
+    @Test fun aDestinationOnlyInvalidatesWhenItsShapeOrVisibleTextureRowChanges() {
+        val artwork = newArtwork()
+        val shadow = shadowOf(artwork)
+        val pin = destination(5.0)
+        fun atRow(row: Double, scale: Double) = MarkArtwork.Destination(
+            pin.pinScale * scale, row / 1024 * pin.height * scale, pin.width * scale, pin.stroke * scale,
+        )
+        artwork.update(atRow(504.1, 1.0))
+        shadow.clearWasInvalidated()
+        artwork.update(atRow(504.9, 0.5))
+        assertFalse(shadow.wasInvalidated())
+        artwork.update(atRow(505.1, 0.5))
+        assertTrue(shadow.wasInvalidated())
+        shadow.clearWasInvalidated()
+        artwork.update(atRow(505.1, 0.5).let { it.copy(stroke = it.stroke * 1.1) })
         assertTrue(shadow.wasInvalidated())
     }
 

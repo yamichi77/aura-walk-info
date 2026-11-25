@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -42,7 +43,7 @@ class HudTrackingTest {
         compose.setContent {
             Column {
                 val frame = skyBandFrame(false, tracking.value, true, north, 0.0, targets)
-                if (rememberSkyBandVisibility(frame) != null) Text("sky band")
+                if (rememberSkyBandVisibility(rememberUpdatedState(frame)).value != null) Text("sky band")
                 SpatialHudPanels(
                     dpPerMeter = 350f,
                     scale = 1f,
