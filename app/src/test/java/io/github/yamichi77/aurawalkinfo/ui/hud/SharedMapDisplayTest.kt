@@ -3,6 +3,8 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 import android.content.Context
 import android.os.Bundle
 import android.view.View
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -10,6 +12,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
@@ -17,8 +20,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -51,6 +56,49 @@ import io.github.yamichi77.aurawalkinfo.settings.HudLayoutConfig as Layout
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SharedMapDisplayTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun xrKeepsGuidanceMountedAndDisablesItsPanelWhileTheLargeMapIsOpen() {
+        val open = mutableStateOf(false)
+        val spec = hudVisualSpecFor(hudTestState(MotionState.WALKING), navState = sampleGuiding())
+        var creations = 0
+        var guidance: HudSurface? = null
+        compose.setContent {
+            SpatialHudPanels(
+                dpPerMeter = 350f, scale = 1f, spec = spec, locationDenied = false,
+                debug = HudDebugOptions(), motionOpacity = 1f, tracking = true,
+                onNoticeTimeout = {}, bigMapOpen = open.value, onTap = {}, inputEnabled = true,
+                countdown = null, quantum = HudQuantum(null, null), wallClock = WallClock { ZonedDateTime.now() },
+                bigMapMode = BigMapMode.FLAT, headingTracking = null, geospatialSettings = null,
+                viewport = remember { BigMapViewport() }, onMapPan = {}, onMapHold = {},
+            ) { surface, content ->
+                if (surface.height == HudPlacement.navHeightMeters) {
+                    remember { creations++ }
+                    SideEffect { guidance = surface }
+                    Box(Modifier.size(220.dp, 70.dp)) { content() }
+                }
+            }
+        }
+        val text = compose.onNodeWithText("40m先 右")
+        text.assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(checkNotNull(guidance).enabled)
+            assertEquals(1, creations)
+            open.value = true
+        }
+        text.assertDoesNotExist()
+        compose.runOnIdle {
+            val hidden = checkNotNull(guidance)
+            assertTrue(!hidden.enabled && hidden.alpha == 0f)
+            assertEquals(1, creations)
+            open.value = false
+        }
+        text.assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(checkNotNull(guidance).enabled)
+            assertEquals(1, creations)
+        }
+    }
 
     @Test
     fun xrKeepsItsPanelsAndMeasuresOnlyTheSettledMapPose() {

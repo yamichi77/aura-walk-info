@@ -21,6 +21,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.xr.arcore.ArDevice
 import androidx.xr.arcore.TrackingState
 import androidx.xr.compose.platform.LocalSession
@@ -50,6 +53,7 @@ import androidx.xr.scenecore.Entity
 import androidx.xr.scenecore.Space
 import androidx.xr.scenecore.scene
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.diagnostics.HudFrameStats
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPanel
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudPlacementCheck
 import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
@@ -86,6 +90,7 @@ internal fun HudScene(
     viewport: BigMapViewport,
     onMapPan: () -> Unit,
     onMapHold: (NavPoint) -> Unit,
+    frameStats: HudFrameStats?,
 ) {
     val session = LocalSession.current
     if (session == null) {
@@ -174,6 +179,12 @@ internal fun HudScene(
     LaunchedEffect(showing, tracking) {
         Log.i("AuraHud", "showing=$showing withoutTracking=${showing && !tracking}")
     }
+    if (showing && frameStats != null) {
+        val owner = LocalLifecycleOwner.current
+        LaunchedEffect(frameStats, owner) {
+            owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { frameStats.observeFrames() }
+        }
+    }
     if (!configured || spec is HudVisualSpec.Hidden) return
     // In rc01, the view target reads the initial ArDevice pose even before TRACKING.
     // tight is this soft mode with an 87 ms half-life. 1 ms snapped to each ArDevice pose and
@@ -201,7 +212,7 @@ internal fun HudScene(
                     LocalDensity.current.density
                 SpatialSkyBand(
                     session, skyBandTargets, skyBandSettings, headingTracking, tracking, spec is HudVisualSpec.Fast,
-                    dpPerMeter, it, debugBuild, debug.selfCheck,
+                    dpPerMeter, it, debugBuild, debug.selfCheck, frameStats,
                 )
                 SpatialHudPanels(
                     dpPerMeter, it, spec, locationDenied, debug, motionOpacity?.value ?: 1f, tracking,
@@ -293,8 +304,11 @@ internal fun SpatialHudPanels(
     if (mapSpec != null) {
         val diameter by animateFloatAsState(mapSpec.mapDiameter, tween(HudAnimationMillis))
         val size = HudPlacement.mapSizeMeters(diameter)
-        mapSpec.rightClusterNavigation(!mapVisible || !map.settledMini || showBigMap)?.let { visual ->
-            SpatialNavGuidance(visual, size, dpPerMeter, scale, mapSpec.opacity, motionOpacity, headingTracking)
+        mapSpec.navigation?.let { visual ->
+            val visible = mapSpec.rightClusterNavigation(!mapVisible || !map.settledMini || showBigMap) != null
+            SpatialNavGuidance(
+                visual, size, dpPerMeter, scale, mapSpec.opacity, motionOpacity, headingTracking, visible, placePanel,
+            )
         }
         val raster = HudPlacement.bigMapSizeMeters
         val miniScale = size / raster

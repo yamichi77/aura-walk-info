@@ -38,13 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
-import androidx.compose.foundation.shape.CornerSize
-import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SubspaceComposable
-import androidx.xr.compose.subspace.draw.alpha
-import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
-import androidx.xr.compose.subspace.layout.height
-import androidx.xr.compose.subspace.layout.width
 import io.github.yamichi77.aurawalkinfo.isDebugBuild
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
 import io.github.yamichi77.aurawalkinfo.heading.hudHeadBearing
@@ -102,21 +96,25 @@ internal fun SpatialNavGuidance(
     opacity: Float,
     motionOpacity: Float,
     headingTracking: HeadingTracking?,
+    visible: Boolean,
+    placePanel: @Composable @SubspaceComposable (HudSurface, @Composable () -> Unit) -> Unit,
 ) {
     val physicalDpPerMeter = dpPerMeter / scale
     val withArrow = visual.arrow != null
     val headBearing: (Long) -> Double? = remember(headingTracking) {
         { now -> headingTracking?.hudHeadBearing(now) }
     }
-    SpatialPanel(
-        HudPlacement.modifier(HudPlacement.navPose(mapSize, withArrow), dpPerMeter, scale)
-            .width((HudPlacement.navWidthMeters(withArrow) * physicalDpPerMeter).dp)
-            .height((HudPlacement.navHeightMeters * physicalDpPerMeter).dp)
-            .alpha(motionOpacity),
-        shape = SpatialRoundedCornerShape(CornerSize(0.dp)),
+    placePanel(
+        HudSurface(
+            HudPlacement.navPose(mapSize, withArrow), HudPlacement.navWidthMeters(withArrow),
+            HudPlacement.navHeightMeters, alpha = if (visible) motionOpacity else 0f,
+            enabled = visible && motionOpacity > 0f, flatCorners = true,
+        ),
     ) {
-        Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
-            NavGuidanceContent(visual, opacity, physicalDpPerMeter, headBearing)
+        if (visible) {
+            Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
+                NavGuidanceContent(visual, opacity, physicalDpPerMeter, headBearing)
+            }
         }
     }
 }

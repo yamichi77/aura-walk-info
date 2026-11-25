@@ -17,6 +17,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import androidx.xr.compose.platform.LocalSpatialCapabilities
 import io.github.yamichi77.aurawalkinfo.diagnostics.DiagnosticsScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.HEAD_TRACKING
 import io.github.yamichi77.aurawalkinfo.diagnostics.HudDebugOptions
+import io.github.yamichi77.aurawalkinfo.diagnostics.HudFrameStats
 import io.github.yamichi77.aurawalkinfo.diagnostics.HeadingSpeechScreen
 import io.github.yamichi77.aurawalkinfo.diagnostics.hasPermission
 import io.github.yamichi77.aurawalkinfo.diagnostics.markPreviewNav
@@ -297,10 +299,12 @@ class MainActivity : ComponentActivity() {
                     }
                     if (spatial) {
                         if (headTrackingGranted) {
+                            val frameStats = if (debugBuild) remember { HudFrameStats() } else null
+                            if (frameStats != null) SideEffect { frameStats.updateNavigation(navState) }
                             SpatialMarks(
                                 displayedState, navState, signal,
                                 skyBandSettings, container.headingTracking, spatialAnchorGranted,
-                                denied, debugBuild,
+                                denied, debugBuild, frameStats,
                             )
                             HudScene(
                                 spec, denied, debug, ::onNoticeTimeout, controls.map.isOpen,
@@ -309,6 +313,7 @@ class MainActivity : ComponentActivity() {
                                 SkyBandTargets.from(navState, signal),
                                 showGeospatialConsent = geospatialEligible,
                                 viewport = bigMapViewport, onMapPan = ::interactWithMap, onMapHold = ::selectMapPoint,
+                                frameStats = frameStats,
                             )
                         }
                     } else {

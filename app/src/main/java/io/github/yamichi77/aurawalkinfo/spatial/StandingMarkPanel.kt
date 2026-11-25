@@ -7,6 +7,10 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Shader
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import androidx.xr.runtime.Session
 import androidx.xr.runtime.math.FloatSize2d
@@ -15,6 +19,7 @@ import androidx.xr.runtime.math.Pose
 import androidx.xr.runtime.math.Vector3
 import androidx.xr.scenecore.AnchorSpace
 import androidx.xr.scenecore.PanelEntity
+import java.util.Locale
 import kotlin.math.acos
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -27,8 +32,14 @@ private const val GLOW_STEPS = 24
 private const val GLOW_OPACITY = 0.29f
 private const val PIN_DOT_RADIUS = 0.18
 
-internal class StandingMarkPanel(session: Session, context: Context, parent: AnchorSpace, kind: MarkKind) {
-    private val artwork = StandingMarkArtwork(context)
+internal class StandingMarkPanel(
+    session: Session,
+    context: Context,
+    parent: AnchorSpace,
+    kind: MarkKind,
+    debug: Boolean,
+) {
+    private val artwork = StandingMarkArtwork(context, kind.takeIf { debug })
     private val panel = PanelEntity.create(
         session, artwork, IntSize2d(MARK_PANEL_PIXELS, MARK_PANEL_PIXELS), "Standing${kind.name}", parent = parent,
     ).apply {
@@ -67,21 +78,26 @@ internal class StandingMarkPanel(session: Session, context: Context, parent: Anc
     }
 }
 
-internal class StandingMarkArtwork(context: Context) : View(context) {
+internal class StandingMarkArtwork(context: Context, debugKind: MarkKind? = null) : View(context) {
     private var drawing: MarkArtwork? = null
+    private var textureKey: MarkTextureKey? = null
+    private val redrawLog = debugKind?.let(::MarkRedrawLog)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
 
     fun update(data: MarkArtwork) {
-        if (drawing == data) return
+        val key = data.textureKey(height.takeIf { it > 0 } ?: MARK_PANEL_PIXELS)
+        if (textureKey == key) return
+        textureKey = key
         drawing = data
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         val data = drawing ?: return
+        val startedAt = if (redrawLog != null) SystemClock.elapsedRealtimeNanos() else 0L
         canvas.save()
         canvas.scale(width / data.width.toFloat(), height / data.height.toFloat())
         when (data) {
@@ -95,6 +111,7 @@ internal class StandingMarkArtwork(context: Context) : View(context) {
             is MarkArtwork.Destination -> drawDestination(canvas, data)
         }
         canvas.restore()
+        redrawLog?.record(SystemClock.elapsedRealtimeNanos() - startedAt)
     }
 
     private fun Path.addLine(points: List<MarkPoint>) {
@@ -126,7 +143,7 @@ internal class StandingMarkArtwork(context: Context) : View(context) {
         }
         val layer = canvas.saveLayer(0f, 0f, data.width.toFloat(), bottom, null)
         // Clip all three layers, including the glow, at the elevation cutoff.
-        val visibleRows = (height * data.visibleHeight / data.height).toInt()
+        val visibleRows = data.visibleTextureRows(height)
         val clipBottom = (visibleRows * data.height / height).toFloat()
         canvas.clipRect(0f, 0f, data.width.toFloat(), clipBottom)
         drawStroke(canvas, outline, stroke)
@@ -163,5 +180,48 @@ internal class StandingMarkArtwork(context: Context) : View(context) {
         paint.color = CORE_COLOR
         paint.strokeWidth = stroke * 0.58f
         canvas.drawPath(path, paint)
+    }
+}
+
+internal sealed interface MarkTextureKey {
+    data class EllipseScale(val x: Int, val y: Int)
+    data class PixelPoint(val x: Int, val y: Int)
+    data class Arrow(
+        val shaft: List<PixelPoint>, val head: List<PixelPoint>, val stroke: EllipseScale, val near: Boolean,
+    ) : MarkTextureKey
+    data class Destination(
+        val pin: EllipseScale, val stroke: EllipseScale, val visibleRows: Int,
+    ) : MarkTextureKey
+}
+
+internal fun MarkArtwork.textureKey(textureHeight: Int): MarkTextureKey {
+    // A bucket is 0.25 px on the 1024 px surface. Compare keys and draw the original geometry.
+    fun normalized(value: Double, span: Double) = (value / span * (4 * MARK_PANEL_PIXELS)).roundToInt()
+    fun scale(value: Double) = MarkTextureKey.EllipseScale(normalized(value, width), normalized(value, height))
+    fun point(point: MarkPoint) = MarkTextureKey.PixelPoint(normalized(point.x, width), normalized(point.y, height))
+    return when (this) {
+        is MarkArtwork.Arrow -> MarkTextureKey.Arrow(shaft.map(::point), head.map(::point), scale(stroke), near)
+        is MarkArtwork.Destination -> MarkTextureKey.Destination(scale(pinScale), scale(stroke), visibleTextureRows(textureHeight))
+    }
+}
+
+private fun MarkArtwork.Destination.visibleTextureRows(textureHeight: Int) =
+    (textureHeight * visibleHeight / height).toInt()
+
+private class MarkRedrawLog(private val kind: MarkKind) {
+    private val handler = Handler(Looper.getMainLooper())
+    private var count = 0
+    private var maxNanos = 0L
+
+    private val report = Runnable {
+        val millis = "%.2f".format(Locale.ROOT, maxNanos / 1_000_000.0)
+        Log.i("AuraSpatial", "REDRAW mark=$kind count=$count maxMillis=$millis")
+        count = 0
+        maxNanos = 0
+    }
+
+    fun record(nanos: Long) {
+        if (count++ == 0) handler.postDelayed(report, 1_000L)
+        maxNanos = maxOf(nanos, maxNanos)
     }
 }

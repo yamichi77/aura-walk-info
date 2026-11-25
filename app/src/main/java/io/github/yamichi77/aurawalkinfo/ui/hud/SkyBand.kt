@@ -11,12 +11,15 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -29,13 +32,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.xr.compose.subspace.SpatialPanel
 import androidx.xr.compose.subspace.SubspaceComposable
 import androidx.xr.compose.subspace.layout.SpatialRoundedCornerShape
 import androidx.xr.compose.subspace.layout.SubspaceModifier
 import androidx.xr.compose.subspace.layout.height
 import androidx.xr.compose.subspace.layout.width
 import androidx.xr.runtime.Session
+import io.github.yamichi77.aurawalkinfo.diagnostics.HudFrameStats
 import io.github.yamichi77.aurawalkinfo.diagnostics.SkyBandSettings
 import io.github.yamichi77.aurawalkinfo.heading.HeadTracking
 import io.github.yamichi77.aurawalkinfo.heading.HeadingTracking
@@ -60,13 +63,14 @@ internal fun SpatialSkyBand(
     scale: Float,
     debugBuild: Boolean,
     selfCheck: Boolean,
+    frameStats: HudFrameStats?,
 ) {
     val latestTargets by rememberUpdatedState(targets)
     val latestOverride by rememberUpdatedState(settings.northOverride)
     val tracked = tracking && !settings.simulateTrackingLoss
     val enabled = settings.enabled
     val sampling = skyBandSamplingActive(fast, tracked, enabled, targets)
-    var sample by remember(heading, sampling) { mutableStateOf<SkySample?>(null) }
+    val sample = remember(heading, sampling) { mutableStateOf<SkySample?>(null) }
     LaunchedEffect(heading, sampling) {
         sampleSkyBand(
             active = sampling,
@@ -77,44 +81,109 @@ internal fun SpatialSkyBand(
                 val rawBearing = pose?.yawDegrees?.let { north?.bearingForYaw(it) }
                 SkySample(latestTargets, north, smoother.update(rawBearing, now), rawBearing)
             },
-            publish = { sample = it },
+            publish = { sample.value = it },
         )
     }
-    val frame = sample?.frame ?: skyBandFrame(fast, tracked, enabled, null, null, targets)
+    val fallback = rememberUpdatedState(skyBandFrame(fast, tracked, enabled, null, null, targets))
+    val frame = remember(sample) { derivedStateOf { sample.value?.frame ?: fallback.value } }
     if (debugBuild) LogSkyBand(frame, sample, sampling)
-    val visible = rememberSkyBandVisibility(frame) ?: return
-    visible.marks.forEach { mark ->
-        key(mark.kind) {
-            SpatialSkyMark(session, mark, visible.alpha, dpPerMeter, scale, selfCheck)
-        }
+    SkyBandPanels(frame, frameStats) { slot ->
+        SpatialSkyMark(session, slot, dpPerMeter, scale, selfCheck)
     }
 }
 
 internal data class VisibleSkyBand(val marks: List<SkyMark>, val alpha: Float)
 
 @Composable
-internal fun rememberSkyBandVisibility(frame: SkyBandFrame): VisibleSkyBand? {
-    // Dropping the animation state also prevents a pre-FAST frame from resurfacing.
-    if (frame.status == SkyBandStatus.FAST) return null
-    var lastMarks by remember { mutableStateOf(emptyList<SkyMark>()) }
-    val alpha = remember { Animatable(0f) }
-    val showing = frame.status == SkyBandStatus.SHOW
-    LaunchedEffect(showing) {
+internal fun rememberSkyBandVisibility(frame: State<SkyBandFrame>): State<VisibleSkyBand?> {
+    val latestFrame = rememberUpdatedState(frame)
+    val status by remember { derivedStateOf { latestFrame.value.value.status } }
+    val fast = status == SkyBandStatus.FAST
+    // Reset the fade across FAST while keeping the spatial panel slots.
+    var lastMarks by remember(fast) { mutableStateOf(emptyList<SkyMark>()) }
+    val alpha = remember(fast) { Animatable(0f) }
+    val showing = status == SkyBandStatus.SHOW
+    LaunchedEffect(alpha, showing) {
         alpha.animateTo(if (showing) 1f else 0f, tween(SkyFadeMillis))
     }
-    SideEffect {
-        if (showing || alpha.value == 0f) lastMarks = frame.marks
+    LaunchedEffect(alpha) {
+        snapshotFlow { latestFrame.value.value.takeIf { it.status == SkyBandStatus.SHOW }?.marks }
+            .collect { if (it != null) lastMarks = it }
     }
-    val marks = if (showing) frame.marks else lastMarks
-    return if (alpha.value > 0f && marks.isNotEmpty()) VisibleSkyBand(marks, SkyMaxOpacity * alpha.value) else null
+    return remember(alpha) {
+        derivedStateOf {
+            val current = latestFrame.value.value
+            val marks = if (current.status == SkyBandStatus.SHOW) current.marks else lastMarks
+            if (current.status == SkyBandStatus.FAST || alpha.value <= 0f || marks.isEmpty()) null
+            else VisibleSkyBand(marks, SkyMaxOpacity * alpha.value)
+        }
+    }
+}
+
+private val SkyPanelSlots = listOf(
+    SkyMarkKind.TURN, SkyMarkKind.DISTANCE, SkyMarkKind.DESTINATION, SkyMarkKind.SIGNAL,
+)
+
+internal class SkyBandSlot(
+    val kind: SkyMarkKind,
+    val mark: State<SkyMark?>,
+    val alpha: () -> Float,
+) {
+    val layout = skyMarkLayout(kind)
+
+    fun pose() = HudPlacement.pose(mark.value?.yaw ?: 0f, layout.pitch)
 }
 
 @Composable
-private fun LogSkyBand(frame: SkyBandFrame, sample: SkySample?, sampling: Boolean) {
-    val latestFrame by rememberUpdatedState(frame)
-    val latestSample by rememberUpdatedState(sample)
-    LaunchedEffect(frame.status, frame.marks.map { it.kind }, sampling) {
+@SubspaceComposable
+internal fun SkyBandPanels(
+    frame: State<SkyBandFrame>,
+    frameStats: HudFrameStats? = null,
+    placePanel: @Composable @SubspaceComposable (SkyBandSlot) -> Unit,
+) {
+    val latestBand = rememberUpdatedState(rememberSkyBandVisibility(frame))
+    if (frameStats != null) {
+        LaunchedEffect(frameStats) {
+            try {
+                snapshotFlow { latestBand.value.value?.marks?.size ?: 0 }
+                    .collect { frameStats.visibleSky = it }
+            } finally {
+                frameStats.visibleSky = 0
+            }
+        }
+    }
+    var mounted by remember { mutableStateOf(false) }
+    if (!mounted) {
+        val showing by remember { derivedStateOf { latestBand.value.value != null } }
+        if (!showing) return
+        SideEffect { mounted = true }
+    }
+    val opacity = remember { { latestBand.value.value?.alpha ?: 0f } }
+    for (kind in SkyPanelSlots) {
+        val slot = remember(kind) {
+            val mark = derivedStateOf(structuralEqualityPolicy()) {
+                latestBand.value.value?.marks?.firstOrNull {
+                    val layoutKind = when (it.kind) {
+                        SkyMarkKind.EDGE_LEFT, SkyMarkKind.EDGE_RIGHT -> SkyMarkKind.TURN
+                        else -> it.kind
+                    }
+                    layoutKind == kind
+                }
+            }
+            SkyBandSlot(kind, mark, opacity)
+        }
+        placePanel(slot)
+    }
+}
+
+@Composable
+private fun LogSkyBand(frame: State<SkyBandFrame>, sample: State<SkySample?>, sampling: Boolean) {
+    val status by remember(frame) { derivedStateOf { frame.value.status } }
+    val kinds by remember(frame) { derivedStateOf { frame.value.marks.map { it.kind } } }
+    LaunchedEffect(frame, status, kinds, sampling) {
         do {
+            val latestFrame = frame.value
+            val latestSample = sample.value
             val angles = latestFrame.marks.joinToString(",") { "${it.kind}:${skyDegrees(it.yaw.toDouble())}" }
             Log.i("AuraSky", "${latestFrame.status} head=${skyDegrees(latestSample?.bearing)} " +
                 "rawHead=${skyDegrees(latestSample?.rawBearing)} " +
@@ -131,33 +200,36 @@ internal fun skyDegrees(angle: Double?): String = angle?.let { "%.2f".format(Loc
 @SubspaceComposable
 private fun SpatialSkyMark(
     session: Session,
-    mark: SkyMark,
-    alpha: Float,
+    slot: SkyBandSlot,
     dpPerMeter: Float,
     scale: Float,
     selfCheck: Boolean,
 ) {
-    val layout = skyMarkLayout(mark.kind)
+    val layout = slot.layout
     val physicalDpPerMeter = dpPerMeter / scale
-    val pose = HudPlacement.pose(mark.yaw, layout.pitch)
-    val placement = HudPlacement.modifier(pose, dpPerMeter, scale)
+    val placement = remember(slot, dpPerMeter, scale) {
+        skyPanelPlacement(dpPerMeter, scale, slot::pose)
+    }
     val size = SubspaceModifier.width((layout.widthMeters * physicalDpPerMeter).dp)
         .height((layout.heightMeters * physicalDpPerMeter).dp)
     val shape = SpatialRoundedCornerShape(CornerSize(0.dp))
-    val content: @Composable () -> Unit = {
-        SkyMarkContent(mark, alpha, layout.glyphMeters * physicalDpPerMeter, Modifier.fillMaxSize())
-    }
-    if (selfCheck) {
-        MeasuredSkyPanel(session, mark.kind, placement, size, shape, scale, content)
-    } else {
-        SpatialPanel(placement.then(size), shape = shape, content = content)
+    MeasuredSkyPanel(session, slot, placement, size, shape, scale, selfCheck) {
+        val artwork by remember(slot) {
+            derivedStateOf { slot.mark.value?.copy(yaw = 0f) }
+        }
+        artwork?.let { SkyMarkContent(it, slot.alpha, layout.glyphMeters * physicalDpPerMeter, Modifier.fillMaxSize()) }
     }
 }
 
 @Composable
 internal fun SkyMarkContent(mark: SkyMark, alpha: Float, glyphDp: Float, modifier: Modifier = Modifier) {
+    SkyMarkContent(mark, { alpha }, glyphDp, modifier)
+}
+
+@Composable
+private fun SkyMarkContent(mark: SkyMark, opacity: () -> Float, glyphDp: Float, modifier: Modifier) {
     val content = modifier.clipToBounds().graphicsLayer {
-        this.alpha = alpha
+        alpha = opacity()
         compositingStrategy = CompositingStrategy.Offscreen
     }.testTag("sky-${mark.kind.name}")
     if (mark.kind == SkyMarkKind.DISTANCE) {
