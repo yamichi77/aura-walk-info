@@ -106,6 +106,8 @@ internal object HudPlacement {
     fun navWidthMeters(withArrow: Boolean): Float =
         if (withArrow) navTextWithArrowWidthMeters + navArrowSizeMeters + navArrowGapMeters else navWidthMeters
 
+    val navPanelWidthMeters = maxOf(navWidthMeters, navWidthMeters(withArrow = true))
+
     fun navPose(mapSizeMeters: Float, withArrow: Boolean): Pose {
         val textPose = navPose(mapSizeMeters)
         if (!withArrow) return textPose

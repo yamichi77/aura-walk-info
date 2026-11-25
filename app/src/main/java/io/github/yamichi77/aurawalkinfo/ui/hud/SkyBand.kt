@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -52,19 +51,14 @@ private val SkyCyan = Color(0xFF7FDBFF)
 
 @Composable
 @SubspaceComposable
-internal fun SpatialSkyBand(
-    session: Session,
+internal fun rememberSkyBandFrame(
     targets: SkyBandTargets,
     settings: SkyBandSettings,
     heading: HeadingTracking,
     tracking: Boolean,
     fast: Boolean,
-    dpPerMeter: Float,
-    scale: Float,
     debugBuild: Boolean,
-    selfCheck: Boolean,
-    frameStats: HudFrameStats?,
-) {
+): State<SkyBandFrame> {
     val latestTargets by rememberUpdatedState(targets)
     val latestOverride by rememberUpdatedState(settings.northOverride)
     val tracked = tracking && !settings.simulateTrackingLoss
@@ -87,7 +81,21 @@ internal fun SpatialSkyBand(
     val fallback = rememberUpdatedState(skyBandFrame(fast, tracked, enabled, null, null, targets))
     val frame = remember(sample) { derivedStateOf { sample.value?.frame ?: fallback.value } }
     if (debugBuild) LogSkyBand(frame, sample, sampling)
-    SkyBandPanels(frame, frameStats) { slot ->
+    return frame
+}
+
+@Composable
+@SubspaceComposable
+internal fun SpatialSkyBand(
+    session: Session,
+    frame: State<SkyBandFrame>,
+    slotCount: Int,
+    dpPerMeter: Float,
+    scale: Float,
+    selfCheck: Boolean,
+    frameStats: HudFrameStats?,
+) {
+    SkyBandPanels(frame, slotCount, frameStats) { slot ->
         SpatialSkyMark(session, slot, dpPerMeter, scale, selfCheck)
     }
 }
@@ -120,9 +128,14 @@ internal fun rememberSkyBandVisibility(frame: State<SkyBandFrame>): State<Visibl
     }
 }
 
-private val SkyPanelSlots = listOf(
+internal val SkyPanelSlots = listOf(
     SkyMarkKind.TURN, SkyMarkKind.DISTANCE, SkyMarkKind.DESTINATION, SkyMarkKind.SIGNAL,
 )
+
+private fun SkyMark.slotKind() = when (kind) {
+    SkyMarkKind.EDGE_LEFT, SkyMarkKind.EDGE_RIGHT -> SkyMarkKind.TURN
+    else -> kind
+}
 
 internal class SkyBandSlot(
     val kind: SkyMarkKind,
@@ -138,37 +151,31 @@ internal class SkyBandSlot(
 @SubspaceComposable
 internal fun SkyBandPanels(
     frame: State<SkyBandFrame>,
+    slotCount: Int,
     frameStats: HudFrameStats? = null,
     placePanel: @Composable @SubspaceComposable (SkyBandSlot) -> Unit,
 ) {
     val latestBand = rememberUpdatedState(rememberSkyBandVisibility(frame))
     if (frameStats != null) {
+        val mountedCount by rememberUpdatedState(slotCount)
         LaunchedEffect(frameStats) {
             try {
-                snapshotFlow { latestBand.value.value?.marks?.size ?: 0 }
-                    .collect { frameStats.visibleSky = it }
+                snapshotFlow {
+                    val marks = latestBand.value.value?.marks.orEmpty()
+                    if (mountedCount == SkyPanelSlots.size) marks.size
+                    else marks.count { SkyPanelSlots.indexOf(it.slotKind()) < mountedCount }
+                }.collect { frameStats.visibleSky = it }
             } finally {
                 frameStats.visibleSky = 0
             }
         }
     }
-    var mounted by remember { mutableStateOf(false) }
-    if (!mounted) {
-        val showing by remember { derivedStateOf { latestBand.value.value != null } }
-        if (!showing) return
-        SideEffect { mounted = true }
-    }
     val opacity = remember { { latestBand.value.value?.alpha ?: 0f } }
-    for (kind in SkyPanelSlots) {
+    for (index in 0 until slotCount) {
+        val kind = SkyPanelSlots[index]
         val slot = remember(kind) {
             val mark = derivedStateOf(structuralEqualityPolicy()) {
-                latestBand.value.value?.marks?.firstOrNull {
-                    val layoutKind = when (it.kind) {
-                        SkyMarkKind.EDGE_LEFT, SkyMarkKind.EDGE_RIGHT -> SkyMarkKind.TURN
-                        else -> it.kind
-                    }
-                    layoutKind == kind
-                }
+                latestBand.value.value?.marks?.firstOrNull { it.slotKind() == kind }
             }
             SkyBandSlot(kind, mark, opacity)
         }
@@ -204,7 +211,7 @@ private fun SpatialSkyMark(
     dpPerMeter: Float,
     scale: Float,
     selfCheck: Boolean,
-) {
+): Unit = traceHud("AuraHud.SkyBand.panel") {
     val layout = slot.layout
     val physicalDpPerMeter = dpPerMeter / scale
     val placement = remember(slot, dpPerMeter, scale) {
@@ -227,7 +234,9 @@ internal fun SkyMarkContent(mark: SkyMark, alpha: Float, glyphDp: Float, modifie
 }
 
 @Composable
-private fun SkyMarkContent(mark: SkyMark, opacity: () -> Float, glyphDp: Float, modifier: Modifier) {
+private fun SkyMarkContent(
+    mark: SkyMark, opacity: () -> Float, glyphDp: Float, modifier: Modifier,
+): Unit = traceHud("AuraHud.SkyBand.content") {
     val content = modifier.clipToBounds().graphicsLayer {
         alpha = opacity()
         compositingStrategy = CompositingStrategy.Offscreen
@@ -236,7 +245,7 @@ private fun SkyMarkContent(mark: SkyMark, opacity: () -> Float, glyphDp: Float, 
         Box(content, contentAlignment = Alignment.Center) {
             HudLabel(requireNotNull(mark.distance), with(LocalDensity.current) { 14.dp.toSp().value }, SkyCyan)
         }
-        return
+        return@traceHud
     }
     Canvas(content) {
         val radius = glyphDp.dp.toPx() / 2f

@@ -89,7 +89,7 @@ class SkyBandPanelTest {
         val slots = mutableListOf<SkyBandSlot>()
         compose.setContent {
             Row {
-                SkyBandPanels(shown) { slot ->
+                SkyBandPanels(shown, SkyPanelSlots.size) { slot ->
                     remember { slots.add(slot) }
                     slot.mark.value?.let { SkyMarkContent(it, slot.alpha(), 20f, Modifier.size(64.dp)) }
                 }
