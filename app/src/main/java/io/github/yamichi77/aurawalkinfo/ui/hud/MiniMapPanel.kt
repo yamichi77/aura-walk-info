@@ -148,47 +148,49 @@ internal fun MiniMapPanel(
     }
 
     BoxWithConstraints(modifier) {
-        val diameter = minOf(maxWidth, maxHeight)
-        if (center != null && hasKey) {
-            val position = if (bigMapMode != null) {
-                bigMapMode.cameraPosition(viewport?.center(center) ?: center, viewport?.zoom(bigMapMode) ?: bigMapMode.zoom)
-            } else northUpCameraPosition(center, compensatedMapZoom(MiniMapZoom, miniScale))
-            val camera = rememberCameraPositionState { this.position = position }
-            if (selfCheck && !large) {
-                LaunchedEffect(position) { Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}") }
+        traceHud("AuraHud.MapContent") {
+            val diameter = minOf(maxWidth, maxHeight)
+            if (center != null && hasKey) {
+                val position = if (bigMapMode != null) {
+                    bigMapMode.cameraPosition(viewport?.center(center) ?: center, viewport?.zoom(bigMapMode) ?: bigMapMode.zoom)
+                } else northUpCameraPosition(center, compensatedMapZoom(MiniMapZoom, miniScale))
+                val camera = rememberCameraPositionState { this.position = position }
+                if (selfCheck && !large) {
+                    LaunchedEffect(position) { Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}") }
+                }
+                MiniMapSurface(
+                    position, centeredMapPadding(diameter), selfCheck = selfCheck && !large,
+                    checkSnapshot = selfCheck && debug.fakeState != null && !large,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
+                    mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
+                    buildingsEnabled = bigMapMode?.buildingsEnabled == true,
+                    camera = camera, onRouteProjection = { project = it },
+                    viewport = viewport.takeIf { large }, preview = preview,
+                    moveImmediately = large || snapCamera,
+                    onMapLoaded = onMapLoaded,
+                )
             }
-            MiniMapSurface(
-                position, centeredMapPadding(diameter), selfCheck = selfCheck && !large,
-                checkSnapshot = selfCheck && debug.fakeState != null && !large,
-                modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
-                mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
-                buildingsEnabled = bigMapMode?.buildingsEnabled == true,
-                camera = camera, onRouteProjection = { project = it },
-                viewport = viewport.takeIf { large }, preview = preview,
-                moveImmediately = large || snapCamera,
-                onMapLoaded = onMapLoaded,
-            )
-        }
-        (routeProjection ?: project)?.let {
-            if (preview != null) {
-                RoutePreviewOverlay(preview, it, Modifier.matchParentSize().alpha(mapOpacity))
-            } else if (route != null) {
-                NavRouteOverlay(route, large, it, Modifier.matchParentSize().alpha(
-                    if (spec.destinationPrompt is DestinationPrompt.Candidates) mapOpacity else 1f,
-                ), scale)
+            (routeProjection ?: project)?.let {
+                if (preview != null) {
+                    RoutePreviewOverlay(preview, it, Modifier.matchParentSize().alpha(mapOpacity))
+                } else if (route != null) {
+                    NavRouteOverlay(route, large, it, Modifier.matchParentSize().alpha(
+                        if (spec.destinationPrompt is DestinationPrompt.Candidates) mapOpacity else 1f,
+                    ), scale)
+                }
             }
-        }
-        val markerHeight = arrowHeight.takeIf { large }
-        MiniMapPlaceholder(
-            spec, Modifier.fillMaxSize(), markerHeight, selfCheck && !large,
-            markerOpacity, if (large) 0.4f else spec.mapLineOpacity, scale,
-        ) { canvasCenter ->
-            val projection = project
-            when {
-                preview != null -> null
-                large && projection != null ->
-                    spec.mapCenter?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
-                else -> canvasCenter
+            val markerHeight = arrowHeight.takeIf { large }
+            MiniMapPlaceholder(
+                spec, Modifier.fillMaxSize(), markerHeight, selfCheck && !large,
+                markerOpacity, if (large) 0.4f else spec.mapLineOpacity, scale,
+            ) { canvasCenter ->
+                val projection = project
+                when {
+                    preview != null -> null
+                    large && projection != null ->
+                        spec.mapCenter?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
+                    else -> canvasCenter
+                }
             }
         }
     }
@@ -212,7 +214,7 @@ internal fun SharedMap(
     onMapHold: (NavPoint) -> Unit,
     quantum: HudQuantum,
     quantumEnabled: Boolean = QuantumEffectsEnabled,
-) {
+): Unit = traceHud("AuraHud.SharedMap") {
     val large = presentation.large
     val transition = presentation.animation
     BoxWithConstraints(if (visible) modifier.testTag("shared-map") else modifier) {
@@ -325,10 +327,14 @@ internal fun MiniMapSurface(
                     if (route == null) null to target else RoutePreviewCamera(route.first, route.second, mapSize) to null
                 }.conflate().collect { (overview, next) ->
                     if (overview != null) {
-                        overview.fit(map)
+                        traceHud("AuraHud.MapCamera.preview") { overview.fit(map) }
                     } else if (next != null && (moveImmediately ||
                             camera.position.zoom != next.zoom || camera.position.tilt != next.tilt)) {
-                        if (map.cameraPosition != next) map.moveCamera(CameraUpdateFactory.newCameraPosition(next))
+                        if (map.cameraPosition != next) {
+                            traceHud("AuraHud.MapCamera.move") {
+                                map.moveCamera(CameraUpdateFactory.newCameraPosition(next))
+                            }
+                        }
                     } else if (next != null && camera.position != next) {
                         try {
                             camera.animate(CameraUpdateFactory.newCameraPosition(next), CAMERA_ANIMATION_MS)

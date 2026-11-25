@@ -111,12 +111,12 @@ internal fun BigMapButton(
     onTap: (HudTarget) -> Unit,
     modifier: Modifier = Modifier,
     motion: BigMapButtonMotion = rememberBigMapButtonMotion(quantum, open, quantumEnabled),
-) {
+): Unit = traceHud("AuraHud.BigMapButton") {
     val motionAlpha by animateFloatAsState(opacity, tween(HudAnimationMillis))
     val opening = quantum?.takeIf { quantumEnabled && open && it.effect == QuantumEffect.OpenMap }
     val orbiting = motion.orbiting
     val rippling = motion.rippling
-    if (label == null && !rippling) return
+    if (label == null && !rippling) return@traceHud
     val click = if (label == null) Modifier else Modifier.hudClick(target, {
         if (quantumEnabled) motion.pinch()
         onTap(it)
@@ -138,15 +138,17 @@ internal fun BigMapButton(
             Canvas(Modifier.matchParentSize().testTag(
                 if (effectTag == null) "$name-artwork" else "quantum-$name-$effectTag",
             )) {
-                val radius = (size.minDimension - 1f) / 2
-                val contentAlpha = (opening?.contentAlpha ?: 1f) * motionAlpha
-                if (label != null) {
-                    drawCircle(QuantumCyan, radius, alpha = 0.7f * contentAlpha, style = Stroke(1f))
-                    drawButtonIcon(label, radius, contentAlpha)
-                    if (opening != null) drawQuantumParticles(particles, opening, center, radius)
-                    if (orbiting) drawQuantumElectron(radius, quantumOrbitAngle(motion.orbit), motionAlpha)
+                traceHud("AuraHud.BigMapButton.draw") {
+                    val radius = (size.minDimension - 1f) / 2
+                    val contentAlpha = (opening?.contentAlpha ?: 1f) * motionAlpha
+                    if (label != null) {
+                        drawCircle(QuantumCyan, radius, alpha = 0.7f * contentAlpha, style = Stroke(1f))
+                        drawButtonIcon(label, radius, contentAlpha)
+                        if (opening != null) drawQuantumParticles(particles, opening, center, radius)
+                        if (orbiting) drawQuantumElectron(radius, quantumOrbitAngle(motion.orbit), motionAlpha)
+                    }
+                    if (rippling) drawQuantumRipple(motion.ripple, radius, radius * 1.22f, motionAlpha)
                 }
-                if (rippling) drawQuantumRipple(motion.ripple, radius, radius * 1.22f, motionAlpha)
             }
             if (label != null && quantumEnabled) {
                 QuantumRimFlash(opening, Modifier.matchParentSize(), "quantum-$name-rim")

@@ -65,6 +65,7 @@ class HudTrackingTest {
                     viewport = remember { BigMapViewport() },
                     onMapPan = {},
                     onMapHold = {},
+                    navPanelReady = false,
                 ) { surface, content ->
                     if (surface.enabled) Box(Modifier.size((surface.width * 350 * surface.visualScale).dp,
                         (surface.height * 350 * surface.visualScale).dp)) { content() }

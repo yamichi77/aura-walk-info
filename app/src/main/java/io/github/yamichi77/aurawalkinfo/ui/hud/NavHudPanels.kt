@@ -89,31 +89,36 @@ private fun NavGuidanceLine(text: String, color: Color, size: TextUnit) {
 @Composable
 @SubspaceComposable
 internal fun SpatialNavGuidance(
-    visual: NavHudVisual,
+    visual: NavHudVisual?,
     mapSize: Float,
     dpPerMeter: Float,
     scale: Float,
     opacity: Float,
     motionOpacity: Float,
     headingTracking: HeadingTracking?,
-    visible: Boolean,
     placePanel: @Composable @SubspaceComposable (HudSurface, @Composable () -> Unit) -> Unit,
 ) {
     val physicalDpPerMeter = dpPerMeter / scale
-    val withArrow = visual.arrow != null
+    val withArrow = visual?.arrow != null
     val headBearing: (Long) -> Double? = remember(headingTracking) {
         { now -> headingTracking?.hudHeadBearing(now) }
     }
     placePanel(
         HudSurface(
-            HudPlacement.navPose(mapSize, withArrow), HudPlacement.navWidthMeters(withArrow),
-            HudPlacement.navHeightMeters, alpha = if (visible) motionOpacity else 0f,
-            enabled = visible && motionOpacity > 0f, flatCorners = true,
+            HudPlacement.navPose(mapSize, withArrow), HudPlacement.navPanelWidthMeters,
+            HudPlacement.navHeightMeters, alpha = if (visual != null) motionOpacity else 0f,
+            enabled = visual != null && motionOpacity > 0f, flatCorners = true,
         ),
     ) {
-        if (visible) {
+        if (visual != null) {
             Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
-                NavGuidanceContent(visual, opacity, physicalDpPerMeter, headBearing)
+                // Preserve the original content width and center within the fixed raster.
+                Box(
+                    Modifier.width((HudPlacement.navWidthMeters(withArrow) * physicalDpPerMeter).dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    NavGuidanceContent(visual, opacity, physicalDpPerMeter, headBearing)
+                }
             }
         }
     }
@@ -125,12 +130,12 @@ internal fun NavGuidanceContent(
     opacity: Float,
     dpPerMeter: Float,
     headBearing: (Long) -> Double?,
-) {
+): Unit = traceHud("AuraHud.NavGuidance") {
     val textScale = Layout.textScale(dpPerMeter)
     val arrow = visual.arrow
     if (arrow == null) {
         NavGuidancePanel(visual, opacity, textScale = textScale)
-        return
+        return@traceHud
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         val arrowSize = (HudPlacement.navArrowSizeMeters * dpPerMeter).dp
@@ -149,8 +154,8 @@ internal fun BoxScope.DestinationMapOverlay(
     enabled: Boolean,
     onTap: (HudTarget) -> Unit,
     quantumEnabled: Boolean,
-) {
-    if (!enabled || prompt == DestinationPrompt.Map || prompt == DestinationPrompt.ConfirmEnd) return
+): Unit = traceHud("AuraHud.DestinationOverlay") {
+    if (!enabled || prompt == DestinationPrompt.Map || prompt == DestinationPrompt.ConfirmEnd) return@traceHud
     val primarySize = with(LocalDensity.current) { 16.dp.toSp() }
     val secondarySize = with(LocalDensity.current) { 14.dp.toSp() }
     if (prompt is DestinationPrompt.Preview) {
@@ -158,7 +163,7 @@ internal fun BoxScope.DestinationMapOverlay(
             routePreviewSummary(prompt.route.route), color = HudText, fontSize = secondarySize,
             modifier = Modifier.align(Alignment.BottomCenter).offset(y = -diameter * 0.1f),
         )
-        return
+        return@traceHud
     }
     Column(
         Modifier.align(Alignment.Center).fillMaxWidth(0.72f),

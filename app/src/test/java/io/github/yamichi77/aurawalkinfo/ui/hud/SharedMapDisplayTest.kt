@@ -70,7 +70,7 @@ class SharedMapDisplayTest {
                 onNoticeTimeout = {}, bigMapOpen = open.value, onTap = {}, inputEnabled = true,
                 countdown = null, quantum = HudQuantum(null, null), wallClock = WallClock { ZonedDateTime.now() },
                 bigMapMode = BigMapMode.FLAT, headingTracking = null, geospatialSettings = null,
-                viewport = remember { BigMapViewport() }, onMapPan = {}, onMapHold = {},
+                viewport = remember { BigMapViewport() }, onMapPan = {}, onMapHold = {}, navPanelReady = true,
             ) { surface, content ->
                 if (surface.height == HudPlacement.navHeightMeters) {
                     remember { creations++ }
@@ -115,7 +115,7 @@ class SharedMapDisplayTest {
                 onNoticeTimeout = {}, bigMapOpen = open.value, onTap = {}, inputEnabled = true,
                 countdown = null, quantum = HudQuantum(null, null), wallClock = WallClock { ZonedDateTime.now() },
                 bigMapMode = BigMapMode.FLAT, headingTracking = null, geospatialSettings = null,
-                viewport = remember { BigMapViewport() }, onMapPan = {}, onMapHold = {},
+                viewport = remember { BigMapViewport() }, onMapPan = {}, onMapHold = {}, navPanelReady = false,
             ) { surface, _ ->
                 val slot = remember { mounts++ }
                 SideEffect {

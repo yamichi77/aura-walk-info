@@ -210,15 +210,19 @@ internal fun HudScene(
             scale?.let {
                 val dpPerMeter = session.scene.virtualPixelDensity.convertMetersToPixels(1f) /
                     LocalDensity.current.density
-                SpatialSkyBand(
-                    session, skyBandTargets, skyBandSettings, headingTracking, tracking, spec is HudVisualSpec.Fast,
-                    dpPerMeter, it, debugBuild, debug.selfCheck, frameStats,
+                val skyFrame = rememberSkyBandFrame(
+                    skyBandTargets, skyBandSettings, headingTracking, tracking, spec is HudVisualSpec.Fast,
+                    debugBuild,
                 )
+                val slots = rememberGuidancePanelSlots(
+                    spec, quantum, locationDenied, bigMapOpen, skyFrame,
+                )
+                SpatialSkyBand(session, skyFrame, slots.skyCount, dpPerMeter, it, debug.selfCheck, frameStats)
                 SpatialHudPanels(
                     dpPerMeter, it, spec, locationDenied, debug, motionOpacity?.value ?: 1f, tracking,
                     onNoticeTimeout, bigMapOpen, onTap, !HideHudOnHeadMotion || !hiddenForMotion,
                     countdown, quantum, wallClock, bigMapMode, headingTracking.takeIf { tracking },
-                    skyBandSettings.takeIf { showGeospatialConsent }, viewport, onMapPan, onMapHold,
+                    skyBandSettings.takeIf { showGeospatialConsent }, viewport, onMapPan, onMapHold, slots.navReady,
                 ) { surface, content ->
                     PlacedPanel(session, surface, dpPerMeter, it, check, content)
                 }
@@ -250,6 +254,7 @@ internal fun SpatialHudPanels(
     viewport: BigMapViewport,
     onMapPan: () -> Unit,
     onMapHold: (NavPoint) -> Unit,
+    navPanelReady: Boolean,
     placePanel: @Composable @SubspaceComposable (
         surface: HudSurface, content: @Composable () -> Unit,
     ) -> Unit,
@@ -301,15 +306,14 @@ internal fun SpatialHudPanels(
             CountdownPanel(countdown, physicalDpPerMeter, onTap, Modifier.fillMaxSize(), inputEnabled)
         }
     }
+    val diameter by animateFloatAsState(mapSpec?.mapDiameter ?: Layout.walkingDiameter, tween(HudAnimationMillis))
+    val size = HudPlacement.mapSizeMeters(diameter)
+    if (navPanelReady) {
+        val visual = mapSpec?.rightClusterNavigation(!mapVisible || !map.settledMini || showBigMap)
+        SpatialNavGuidance(visual, size, dpPerMeter, scale, mapSpec?.opacity ?: 1f, motionOpacity,
+            headingTracking, placePanel)
+    }
     if (mapSpec != null) {
-        val diameter by animateFloatAsState(mapSpec.mapDiameter, tween(HudAnimationMillis))
-        val size = HudPlacement.mapSizeMeters(diameter)
-        mapSpec.navigation?.let { visual ->
-            val visible = mapSpec.rightClusterNavigation(!mapVisible || !map.settledMini || showBigMap) != null
-            SpatialNavGuidance(
-                visual, size, dpPerMeter, scale, mapSpec.opacity, motionOpacity, headingTracking, visible, placePanel,
-            )
-        }
         val raster = HudPlacement.bigMapSizeMeters
         val miniScale = size / raster
         val measure = when {
@@ -383,7 +387,9 @@ private fun PlacedPanel(
     var entity by remember { mutableStateOf<Entity?>(null) }
     val placement = HudPlacement.modifier(surface.pose, dpPerMeter, scale)
         .scale(surface.visualScale).alpha(surface.alpha)
-    SceneCoreEntity(factory = { Entity.create(session, "Aura HUD panel") }, modifier = placement, update = {
+    SceneCoreEntity(factory = {
+        Entity.create(session, "Aura HUD panel").apply { if (!surface.enabled) setEnabled(false) }
+    }, modifier = placement, update = {
         // rc01 alpha only changes rendering. Disable the parent to remove all child hit targets.
         if (it.isEnabled(includeParents = false) != surface.enabled) it.setEnabled(surface.enabled)
         if (check != null) entity = it
