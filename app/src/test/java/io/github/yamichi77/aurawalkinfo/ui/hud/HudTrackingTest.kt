@@ -64,8 +64,9 @@ class HudTrackingTest {
                     viewport = remember { BigMapViewport() },
                     onMapPan = {},
                     onMapHold = {},
-                ) { _, width, height, _, content ->
-                    Box(Modifier.size((width * 350).dp, (height * 350).dp)) { content() }
+                ) { surface, content ->
+                    if (surface.enabled) Box(Modifier.size((surface.width * 350 * surface.visualScale).dp,
+                        (surface.height * 350 * surface.visualScale).dp)) { content() }
                 }
             }
         }

@@ -65,13 +65,14 @@ internal fun NavRouteOverlay(
     bigMap: Boolean,
     project: ProjectNavPoints,
     modifier: Modifier = Modifier,
+    panelScale: Float = 1f,
 ) {
     Canvas(modifier.clip(CircleShape)) {
         val points = project(route.remaining + route.destination + listOfNotNull(route.nextTurn))
         val line = points.take(route.remaining.size)
-        drawRouteLine(line, route.opacity, width = if (bigMap) 4f else 3f)
-        drawCircle(HudArrow, radius = 5f, center = points[line.size], style = Stroke(1.5f))
-        if (route.nextTurn != null) drawCircle(HudArrow, radius = 3f, center = points.last())
+        drawRouteLine(line, route.opacity, width = (if (bigMap) 4f else 3f) / panelScale)
+        drawCircle(HudArrow, radius = 5f / panelScale, center = points[line.size], style = Stroke(1.5f / panelScale))
+        if (route.nextTurn != null) drawCircle(HudArrow, radius = 3f / panelScale, center = points.last())
     }
 }
 

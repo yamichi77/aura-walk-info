@@ -2,7 +2,6 @@ package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import android.util.Log
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
@@ -35,9 +34,11 @@ internal fun MiniMapPlaceholder(
     modifier: Modifier = Modifier,
     arrowHeight: Dp? = null,
     selfCheck: Boolean = false,
+    opacity: Float = spec.opacity,
+    lineOpacity: Float = spec.mapLineOpacity,
+    panelScale: Float = 1f,
     markerPosition: (Offset) -> Offset? = { it },
 ) {
-    val opacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
     val bearing = spec.mapBearingDeg
     val angle = if (bearing != null) remember { Animatable(bearing) } else null
     LaunchedEffect(bearing, selfCheck) {
@@ -52,7 +53,8 @@ internal fun MiniMapPlaceholder(
     Canvas(modifier.clip(CircleShape).alpha(opacity)) {
         val radius = size.minDimension / 2
         val markerRadius = (arrowHeight?.toPx() ?: mapArrowHeight(size.minDimension)) / 2
-        drawCircle(HudText.copy(alpha = spec.mapLineOpacity), radius - 0.5f, style = Stroke(1f))
+        val stroke = 1f / panelScale
+        drawCircle(HudText.copy(alpha = lineOpacity), radius - stroke / 2, style = Stroke(stroke))
         val marker = markerPosition(center) ?: return@Canvas
         if ((marker - center).getDistance() > radius) return@Canvas
         if (angle == null) {

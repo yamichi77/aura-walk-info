@@ -13,20 +13,21 @@ import android.view.ViewOutlineProvider
 import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -34,9 +35,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMapOptions
 import com.google.android.gms.maps.MapView
@@ -73,7 +73,6 @@ import com.google.android.gms.maps.GoogleMap as SdkMap
 
 internal const val MAP_LOG_TAG = "AuraMap"
 private const val SNAPSHOT_FILE = "minimap-snapshot.png"
-private const val MAP_ZOOM = 17.5f
 private const val CAMERA_ANIMATION_MS = 500
 
 internal fun centeredMapPadding(diameter: Dp) = PaddingValues(diameter * 0.15f)
@@ -112,109 +111,121 @@ internal fun MiniMapPanel(
     arrowHeight: Dp? = null,
     routeProjection: ProjectNavPoints? = null,
     viewport: BigMapViewport? = null,
+    snapCamera: Boolean = false,
+    miniScale: Float = 1f,
+    onMapLoaded: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val hasKey = remember(context) { context.hasMapsKey() }
+    val hasKey = rememberHasMapsKey()
     val selfCheck = debug.selfCheck && context.isDebugBuild()
-    val center = spec.mapCenter
-    val preview = (spec.destinationPrompt as? DestinationPrompt.Preview)?.route.takeIf { bigMapMode != null }
-    val cameraCenter = viewport?.center(center) ?: center
-        ?: preview?.origin?.let { MapCenter(it.latitude, it.longitude) }
-    val mapOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
+    val large = bigMapMode != null
+    val preview = (spec.destinationPrompt as? DestinationPrompt.Preview)?.route.takeIf { large }
+    val currentCenter = spec.mapCenter ?: preview?.origin?.let { MapCenter(it.latitude, it.longitude) }
+        ?: viewport?.center(null)?.takeIf { large }
+    var lastCenter by remember { mutableStateOf<MapCenter?>(null) }
+    if (currentCenter != null) SideEffect { lastCenter = currentCenter }
+    val center = currentCenter ?: lastCenter
+    val miniOpacity by animateFloatAsState(spec.mapOpacity, tween(HudAnimationMillis))
+    val clusterOpacity by animateFloatAsState(spec.opacity, tween(HudAnimationMillis))
+    val largeOpacity by animateFloatAsState(when (spec.destinationPrompt) {
+        is DestinationPrompt.Candidates -> 0.4f
+        is DestinationPrompt.Listening -> 0.3f
+        else -> spec.opacity
+    }, tween(HudAnimationMillis))
+    val mapOpacity = if (large) largeOpacity else miniOpacity
+    val markerOpacity = if (large) largeOpacity else clusterOpacity
+    val scale = if (large) 1f else miniScale
     val route = spec.navigation?.route
     var project by remember { mutableStateOf<ProjectNavPoints?>(null) }
-    if (selfCheck) {
+    if (selfCheck && !large) {
         LaunchedEffect(hasKey) {
             if (!hasKey) Log.i(MAP_LOG_TAG, "SKIP key=missing")
         }
         LaunchedEffect(spec.mapDiameter, spec.mapOpacity) {
-            snapshotFlow { mapOpacity }.first { it == spec.mapOpacity }
+            snapshotFlow { miniOpacity }.first { it == spec.mapOpacity }
             Log.i(MAP_LOG_TAG, "presentation diameter=${spec.mapDiameter} mapOpacity=${spec.mapOpacity}")
         }
     }
 
     BoxWithConstraints(modifier) {
-        if (cameraCenter != null && hasKey) {
-            val position = if (bigMapMode != null && viewport != null) {
-                bigMapMode.cameraPosition(cameraCenter, viewport.zoom(bigMapMode))
-            } else {
-                bigMapMode?.cameraPosition(cameraCenter) ?: northUpCameraPosition(cameraCenter, MAP_ZOOM)
-            }
-            if (selfCheck) {
-                LaunchedEffect(position) {
-                    Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}")
-                }
-            }
-            // Maps projects the GPS target to the center of the padded area, including at a tilt.
-            val padding = centeredMapPadding(minOf(maxWidth, maxHeight))
+        val diameter = minOf(maxWidth, maxHeight)
+        if (center != null && hasKey) {
+            val position = if (bigMapMode != null) {
+                bigMapMode.cameraPosition(viewport?.center(center) ?: center, viewport?.zoom(bigMapMode) ?: bigMapMode.zoom)
+            } else northUpCameraPosition(center, compensatedMapZoom(MiniMapZoom, miniScale))
             val camera = rememberCameraPositionState { this.position = position }
+            if (selfCheck && !large) {
+                LaunchedEffect(position) { Log.i(MAP_LOG_TAG, "camera targetBearing=${position.bearing}") }
+            }
             MiniMapSurface(
-                position, padding, selfCheck, checkSnapshot = selfCheck && debug.fakeState != null,
+                position, centeredMapPadding(diameter), selfCheck = selfCheck && !large,
+                checkSnapshot = selfCheck && debug.fakeState != null && !large,
                 modifier = Modifier.fillMaxSize().clip(CircleShape).alpha(mapOpacity),
                 mapStyle = bigMapMode?.style ?: R.raw.map_style_dark,
                 buildingsEnabled = bigMapMode?.buildingsEnabled == true,
-                camera = camera,
-                onRouteProjection = { project = it },
-                viewport = viewport,
-                preview = preview,
+                camera = camera, onRouteProjection = { project = it },
+                viewport = viewport.takeIf { large }, preview = preview,
+                moveImmediately = large || snapCamera,
+                onMapLoaded = onMapLoaded,
             )
         }
         (routeProjection ?: project)?.let {
             if (preview != null) {
                 RoutePreviewOverlay(preview, it, Modifier.matchParentSize().alpha(mapOpacity))
             } else if (route != null) {
-                NavRouteOverlay(route, bigMapMode != null, it, Modifier.matchParentSize().alpha(
+                NavRouteOverlay(route, large, it, Modifier.matchParentSize().alpha(
                     if (spec.destinationPrompt is DestinationPrompt.Candidates) mapOpacity else 1f,
-                ))
+                ), scale)
             }
         }
-        MiniMapPlaceholder(spec, Modifier.fillMaxSize(), arrowHeight, selfCheck) { canvasCenter ->
+        val markerHeight = arrowHeight.takeIf { large }
+        MiniMapPlaceholder(
+            spec, Modifier.fillMaxSize(), markerHeight, selfCheck && !large,
+            markerOpacity, if (large) 0.4f else spec.mapLineOpacity, scale,
+        ) { canvasCenter ->
             val projection = project
-            if (preview != null) {
-                null
-            } else if (viewport != null && projection != null) {
-                center?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
-            } else {
-                canvasCenter
+            when {
+                preview != null -> null
+                large && projection != null ->
+                    spec.mapCenter?.let { projection(listOf(NavPoint(it.latitude, it.longitude))).single() }
+                else -> canvasCenter
             }
         }
     }
 }
 
 @Composable
-internal fun ClickableMap(
+internal fun SharedMap(
     spec: HudVisualSpec.Clusters,
     debug: HudDebugOptions,
-    target: HudTarget,
+    presentation: SharedMapPresentation,
+    visible: Boolean,
+    open: Boolean,
+    miniScale: Float,
     onTap: (HudTarget) -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    bigMapArrowHeight: Dp? = null,
-    bigMapMode: BigMapMode = BigMapMode.FLAT,
-    viewport: BigMapViewport? = null,
-    onMapPan: () -> Unit = {},
-    onMapHold: (NavPoint) -> Unit = {},
+    modifier: Modifier,
+    inputEnabled: Boolean,
+    bigMapArrowHeight: Dp,
+    bigMapMode: BigMapMode,
+    viewport: BigMapViewport?,
+    onMapPan: () -> Unit,
+    onMapHold: (NavPoint) -> Unit,
+    quantum: HudQuantum,
     quantumEnabled: Boolean = QuantumEffectsEnabled,
 ) {
-    if (target == HudTarget.BIGMAP) {
-        BoxWithConstraints(modifier) {
-            val diameter = minOf(maxHeight, maxWidth)
-            val mapOpacity = when {
-                spec.destinationPrompt is DestinationPrompt.Candidates -> 0.4f
-                enabled && spec.destinationPrompt is DestinationPrompt.Listening -> 0.3f
-                else -> spec.opacity
-            }
-            MiniMapPanel(
-                spec = spec.copy(
-                    opacity = mapOpacity, mapOpacity = mapOpacity, mapLineOpacity = 0.4f,
-                    mapDiameter = HudPlacement.bigMapDiameter,
-                ),
-                debug = debug.copy(selfCheck = false),
-                modifier = Modifier.matchParentSize(),
-                arrowHeight = bigMapArrowHeight,
-                bigMapMode = bigMapMode,
-                viewport = viewport,
-            )
+    val large = presentation.large
+    val transition = presentation.animation
+    BoxWithConstraints(if (visible) modifier.testTag("shared-map") else modifier) {
+        val diameter = minOf(maxHeight, maxWidth)
+        val animation = transition ?: quantum.miniMap.takeUnless { large }
+        val mapLayer = Modifier.matchParentSize().alpha(if (visible && !presentation.hidden) 1f else 0f)
+        QuantumMap(animation, mapLayer, if (large) 1f else miniScale, quantumEnabled, large) { mapModifier ->
+            MiniMapPanel(spec, if (visible) debug else debug.copy(selfCheck = false), mapModifier,
+                bigMapMode.takeIf { large }, bigMapArrowHeight, viewport = viewport,
+                snapCamera = presentation.hidden || transition?.effect == QuantumEffect.ReturnMap,
+                miniScale = miniScale, onMapLoaded = quantum.onMapLoaded)
+        }
+        if (visible && open && presentation.acceptsLargeInput) {
             val onPan by rememberUpdatedState<(Offset) -> Unit> { delta ->
                 if (spec.destinationPrompt !is DestinationPrompt.Preview) {
                     viewport?.pan(delta)
@@ -227,24 +238,25 @@ internal fun ClickableMap(
                 }
             }
             val onOutside by rememberUpdatedState { onTap(HudTarget.OUTSIDE) }
-            // A plain tap closes the map only in the normal map view, not while choosing a destination.
             val onMapTap by rememberUpdatedState {
                 if (spec.destinationPrompt == DestinationPrompt.Map) onTap(HudTarget.BIGMAP)
             }
             Box(
                 Modifier.matchParentSize().testTag("bigmap").then(
-                    if (enabled) Modifier.bigMapGestures({ onPan(it) }, { onHold(it) }, { onOutside() }, { onMapTap() })
+                    if (inputEnabled) Modifier.bigMapGestures({ onPan(it) }, { onHold(it) }, { onOutside() }, { onMapTap() })
                     else Modifier,
                 ),
             )
-            DestinationMapOverlay(spec.destinationPrompt, diameter, enabled, onTap, quantumEnabled)
-        }
-    } else {
-        Box(modifier) {
-            MiniMapPanel(spec, debug, Modifier.matchParentSize())
-            Box(Modifier.matchParentSize().hudClick(target, onTap, enabled))
+            DestinationMapOverlay(spec.destinationPrompt, diameter, inputEnabled, onTap, quantumEnabled)
+        } else if (visible && !open && presentation.settledMini && quantum.miniMap?.drawing != false) {
+            Box(Modifier.matchParentSize().hudClick(HudTarget.MAP, onTap, inputEnabled))
         }
     }
+}
+
+// The SDK factory is also the lifetime boundary exercised by the host-side display tests.
+internal val LocalHudMapViewFactory = staticCompositionLocalOf<(Context, GoogleMapOptions) -> MapView> {
+    { context, options -> MapView(context, options) }
 }
 
 @OptIn(MapsComposeExperimentalApi::class)
@@ -262,6 +274,8 @@ internal fun MiniMapSurface(
     onRouteProjection: ((ProjectNavPoints?) -> Unit)? = null,
     viewport: BigMapViewport? = null,
     preview: NavState.Preview? = null,
+    moveImmediately: Boolean = false,
+    onMapLoaded: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val properties = remember(context, mapStyle, buildingsEnabled) {
@@ -279,6 +293,7 @@ internal fun MiniMapSurface(
     val sdkMap = remember { CompletableDeferred<SdkMap>() }
     var mapSize by remember { mutableStateOf(IntSize.Zero) }
     val captureSnapshot = checkSnapshot || probeCase != null
+    val createView = LocalHudMapViewFactory.current
     GoogleMap(
         modifier = if (captureSnapshot || preview != null) modifier.onSizeChanged { mapSize = it } else modifier,
         cameraPositionState = camera,
@@ -286,9 +301,12 @@ internal fun MiniMapSurface(
         properties = properties,
         uiSettings = mapUi,
         contentPadding = padding,
-        onMapLoaded = if (captureSnapshot) ({ loaded.complete(SystemClock.elapsedRealtime() - startedAt) }) else null,
+        onMapLoaded = if (captureSnapshot || onMapLoaded != null) ({
+            loaded.complete(SystemClock.elapsedRealtime() - startedAt)
+            onMapLoaded?.invoke()
+        }) else null,
         mapViewFactory = { viewContext, options ->
-            MapView(viewContext, options).apply {
+            createView(viewContext, options).apply {
                 // AndroidView needs a native outline to clip its embedded map view.
                 outlineProvider = mapOutline
                 clipToOutline = true
@@ -296,7 +314,7 @@ internal fun MiniMapSurface(
         },
     ) {
         if (onRouteProjection != null) NavMapProjectionEffect(camera, onRouteProjection)
-        MapEffect(selfCheck, captureSnapshot, viewport) { map ->
+        MapEffect(selfCheck, captureSnapshot, viewport, moveImmediately) { map ->
             if (captureSnapshot) sdkMap.complete(map)
             val gestureMap = if (viewport != null) SdkBigMapGestureMap(map) else null
             if (viewport != null) viewport.gestureMap = gestureMap
@@ -308,7 +326,8 @@ internal fun MiniMapSurface(
                 }.conflate().collect { (overview, next) ->
                     if (overview != null) {
                         overview.fit(map)
-                    } else if (next != null && viewport != null) {
+                    } else if (next != null && (moveImmediately ||
+                            camera.position.zoom != next.zoom || camera.position.tilt != next.tilt)) {
                         if (map.cameraPosition != next) map.moveCamera(CameraUpdateFactory.newCameraPosition(next))
                     } else if (next != null && camera.position != next) {
                         try {
@@ -359,6 +378,12 @@ private class SdkBigMapGestureMap(private val map: SdkMap) : BigMapGestureMap {
         map.projection.fromScreenLocation(Point(pixel.x.roundToInt(), pixel.y.roundToInt()))?.let {
             NavPoint(it.latitude, it.longitude)
         }
+}
+
+@Composable
+internal fun rememberHasMapsKey(): Boolean {
+    val context = LocalContext.current
+    return remember(context) { context.hasMapsKey() }
 }
 
 internal fun Context.hasMapsKey(): Boolean {
