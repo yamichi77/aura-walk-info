@@ -31,7 +31,7 @@ internal enum class HudPanel(val yaw: Float, val pitch: Float) {
 }
 
 internal class HudPlacementCheck(includeGrid: Boolean) {
-    data class Panel(val entity: Entity, val width: Float, val height: Float)
+    data class Panel(val entity: Entity, val localWidth: Float, val localHeight: Float)
 
     val panels = mutableMapOf<HudPanel, Panel>()
     private val clusters = listOf(HudPanel.LEFT, HudPanel.RIGHT)
@@ -49,15 +49,18 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
     fun sampleBigMap(session: Session, headPose: Pose): Boolean {
         val name = HudPanel.BIGMAP
         val panel = panels[name] ?: return false
-        if (panel.entity.isDisposed || panel.width <= 0 || panel.height <= 0) return false
+        if (panel.entity.isDisposed || panel.localWidth <= 0 || panel.localHeight <= 0) return false
         if (panelOpacity(name)?.let { it > 0f } != true) return false
         val scene = session.scene
         val inverseHead = scene.perceptionSpace.transformPoseTo(headPose, scene.activitySpace).inverse
         val relative = inverseHead.compose(panel.entity.getPose(Space.ACTIVITY))
-        val measured = measure(name, relative, panel.width, panel.height)
-        val diameter = Math.toDegrees(atan2(minOf(panel.width, panel.height) / 2, measured.distance).toDouble()) * 2
+        val scale = panel.entity.getScale(Space.ACTIVITY)
+        val width = panel.localWidth * scale
+        val height = panel.localHeight * scale
+        val measured = measure(name, relative, width, height)
+        val diameter = Math.toDegrees(atan2(minOf(width, height) / 2, measured.distance).toDouble()) * 2
         val pass = abs(measured.yaw - name.yaw) <= 1 && abs(measured.pitch - name.centerPitch) <= 1 &&
-            abs(diameter - HudPlacement.bigMapDiameter) <= 1 && abs(panel.width - panel.height) <= 0.01f &&
+            abs(diameter - HudPlacement.bigMapDiameter) <= 1 && abs(width - height) <= 0.01f &&
             abs(measured.distance - Layout.distanceMeters) <= 0.05f
         Log.i(Tag, "BIGMAP ${verdict(pass)} yaw=${decimal(measured.yaw)} pitch=${decimal(measured.pitch)} " +
             "diameter=${decimal(diameter)} distance=${decimal(measured.distance.toDouble(), 3)}")
@@ -77,10 +80,11 @@ internal class HudPlacementCheck(includeGrid: Boolean) {
                 val visible = clearZone[name]
                 if (!isStationary && visible == null) continue
                 val panel = panels[name] ?: continue
-                if (panel.entity.isDisposed || panel.width <= 0 || panel.height <= 0) continue
+                if (panel.entity.isDisposed || panel.localWidth <= 0 || panel.localHeight <= 0) continue
                 if (panelOpacity(name)?.let { it > 0f } != true) continue
                 val relative = inverseHead.compose(panel.entity.getPose(Space.ACTIVITY))
-                val measurement = measure(name, relative, panel.width, panel.height)
+                val scale = panel.entity.getScale(Space.ACTIVITY)
+                val measurement = measure(name, relative, panel.localWidth * scale, panel.localHeight * scale)
                 if (isStationary) stationary.getValue(name) += measurement
                 visible?.record(measurement.edge, speed)
             }

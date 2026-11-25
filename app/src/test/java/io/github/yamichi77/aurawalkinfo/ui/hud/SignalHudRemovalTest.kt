@@ -36,6 +36,7 @@ class SignalHudRemovalTest {
         Robolectric.buildActivity(MainActivity::class.java, intent).setup().use {
             val main = shadowOf(Looper.getMainLooper())
             main.idle()
+            compose.mainClock.advanceTimeBy(2_200) // Finish the startup map wait before sending the signal.
             val replay = shadowOf(app).registeredReceivers.single { it.intentFilter.hasAction(replayAction) }
             replay.broadcastReceiver.onReceive(app, Intent(replayAction).putExtra("scenario", "spatial"))
             main.idle()

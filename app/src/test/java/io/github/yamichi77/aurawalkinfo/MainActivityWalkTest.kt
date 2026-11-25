@@ -155,6 +155,8 @@ class MainActivityWalkTest {
         val show2d = compose.onNode(hasTestTag("bigmap_mode") and hasText("2D"))
         Robolectric.buildActivity(MainActivity::class.java, intent).setup().use { controller ->
             val controls = ViewModelProvider(controller.get())[HudControls::class.java]
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(2_200) // No tile-service callback in this activity test.
             mini.assertIsDisplayed().performClick()
             show3d.assertIsDisplayed()
             val deadline = controls.map.closesAt
@@ -177,6 +179,8 @@ class MainActivityWalkTest {
             mini.assertIsDisplayed()
         }
         Robolectric.buildActivity(MainActivity::class.java, intent).setup().use {
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(2_200)
             mini.assertIsDisplayed()
             toggle.assertDoesNotExist()
             mini.performClick()

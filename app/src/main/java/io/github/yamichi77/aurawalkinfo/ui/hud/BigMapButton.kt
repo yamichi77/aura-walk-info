@@ -113,7 +113,7 @@ internal fun BigMapButton(
     motion: BigMapButtonMotion = rememberBigMapButtonMotion(quantum, open, quantumEnabled),
 ) {
     val motionAlpha by animateFloatAsState(opacity, tween(HudAnimationMillis))
-    val opening = quantum?.takeIf { open && it.effect == QuantumEffect.OpenMap }
+    val opening = quantum?.takeIf { quantumEnabled && open && it.effect == QuantumEffect.OpenMap }
     val orbiting = motion.orbiting
     val rippling = motion.rippling
     if (label == null && !rippling) return
@@ -122,10 +122,7 @@ internal fun BigMapButton(
         onTap(it)
     }, enabled)
     Column(
-        modifier.graphicsLayer {
-            val fade = if (quantum?.effect == QuantumEffect.CloseMap) 1f - quantum.contentAlpha else 1f
-            alpha = fade
-        }.then(click),
+        modifier.then(click),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -146,7 +143,7 @@ internal fun BigMapButton(
                 if (label != null) {
                     drawCircle(QuantumCyan, radius, alpha = 0.7f * contentAlpha, style = Stroke(1f))
                     drawButtonIcon(label, radius, contentAlpha)
-                    if (opening != null) drawQuantumParticles(particles, opening, center, radius, outgoing = false)
+                    if (opening != null) drawQuantumParticles(particles, opening, center, radius)
                     if (orbiting) drawQuantumElectron(radius, quantumOrbitAngle(motion.orbit), motionAlpha)
                 }
                 if (rippling) drawQuantumRipple(motion.ripple, radius, radius * 1.22f, motionAlpha)

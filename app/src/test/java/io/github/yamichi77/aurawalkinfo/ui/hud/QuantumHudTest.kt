@@ -64,15 +64,32 @@ class QuantumHudTest {
     private val wallClock = WallClock { now }
 
     @Test
+    fun missingPermissionShowsItsMessageImmediatelyAndSkipsStartup() {
+        val startup = HudQuantumStartup()
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            PhoneScreen(hudVisualSpecFor(state.value), true, HudDebugOptions(), {}, false, quantumStartup = startup) {}
+        }
+        frames()
+        text("位置の権限がありません")
+        tag("shared-map").assertDoesNotExist()
+        tag("quantum-map").assertDoesNotExist()
+        assertEquals(false, startup.mapPlayed)
+    }
+
+    @Test
     fun startupSkipsTheNoticeAndPlaysOnceThenDisplaysTheSameStandbyHud() {
         notice.value = true
         show()
         text(SafetyNotice.MESSAGE)
         tag("quantum-left").assertDoesNotExist()
+        tag("quantum-map").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(96)
         effect("map")
         settle()
         noEffects()
         change { notice.value = false }
+        compose.mainClock.advanceTimeBy(96)
         effect("left")
         animatedTime("9:05").assertExists()
         tag("quantum-map").assertDoesNotExist()
@@ -147,11 +164,9 @@ class QuantumHudTest {
         settle()
         tag("map").performClick()
         frames()
-        // The gathering waits until frames flow again after the big map is built.
         tag("quantum-bigmap").assertDoesNotExist()
-        openFrames()
-        effect("bigmap")
-        compose.mainClock.advanceTimeBy(QuantumTransitionMillis + 1_100L)
+        tag("bigmap_mode").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(QuantumTransitionMillis + 1_300L)
         noEffects()
         tag("bigmap").assertIsDisplayed()
         tag("nav_destination").assertIsDisplayed()
@@ -161,9 +176,12 @@ class QuantumHudTest {
         tag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
         frames()
         effect("bigmap")
-        effect("map")
+        tag("quantum-map").assertDoesNotExist()
         tag("nav_destination").assertIsNotEnabled()
         tag("bigmap_mode").assertIsNotEnabled()
+        compose.mainClock.advanceTimeBy(620)
+        effect("map")
+        tag("quantum-bigmap").assertDoesNotExist()
         settle()
         noEffects()
         tag("map").assertIsDisplayed()
@@ -176,7 +194,7 @@ class QuantumHudTest {
         settle()
         change { map.value = map.value.advance(checkNotNull(map.value.closesAt), state.value.motionState) }
         effect("bigmap")
-        effect("map")
+        tag("quantum-map").assertDoesNotExist()
         change {
             state.value = state.value.copy(motionState = MotionState.FAST)
             map.value = map.value.advance(0, MotionState.FAST)
@@ -200,13 +218,16 @@ class QuantumHudTest {
         settle()
         tag("map").performClick()
         frames()
-        openFrames()
+        tag("bigmap_mode").assertDoesNotExist()
+        tag("quantum-bigmap-rim").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(96)
+        effect("bigmap")
+        tag("quantum-bigmap-rim").assertDoesNotExist()
         for (button in listOf("nav_destination", "bigmap_mode")) {
             effect("$button-gather")
             tag("quantum-$button-orbit").assertDoesNotExist()
         }
-        tag("quantum-bigmap-rim").assertDoesNotExist()
-        compose.mainClock.advanceTimeBy(550)
+        compose.mainClock.advanceTimeBy(500)
         effect("bigmap-rim")
         for (button in listOf("nav_destination", "bigmap_mode")) {
             tag("quantum-$button-gather").assertDoesNotExist()
@@ -240,7 +261,7 @@ class QuantumHudTest {
     }
 
     @Test
-    fun disabledUsesOrdinaryTextAndMapFade() {
+    fun disabledUsesAnOrdinaryFadeAtTheTwoMapPositions() {
         show(enabled = false)
         noEffects()
         text("タップで開始")
@@ -259,6 +280,9 @@ class QuantumHudTest {
         tag("map").performClick()
         frames()
         noEffects()
+        tag("bigmap").assertDoesNotExist()
+        settle()
+        noEffects()
         tag("bigmap").assertIsDisplayed()
         change { prompt.value = candidatePrompt() }
         text("合成候補", "850m ・ みほん市", "やめる")
@@ -272,7 +296,8 @@ class QuantumHudTest {
         tag("outside").performTouchInput { click(Offset(5f, height - 5f)) }
         frames()
         noEffects()
-        tag("bigmap").assertExists() // The original fade keeps the non-clickable map mounted.
+        tag("bigmap").assertDoesNotExist()
+        tag("map").assertDoesNotExist()
         settle()
         tag("bigmap").assertDoesNotExist()
         tag("map").assertIsDisplayed()
@@ -318,7 +343,7 @@ class QuantumHudTest {
         compose.setContent {
             view = LocalView.current
             Canvas(Modifier.size(21.dp).background(Color.Black).testTag("particle")) {
-                drawQuantumParticles(listOf(particle), animation, center, 1f, outgoing = false)
+                drawQuantumParticles(listOf(particle), animation, center, 1f)
             }
         }
         val bounds = tag("particle").getUnclippedBoundsInRoot()
@@ -381,11 +406,6 @@ class QuantumHudTest {
         compose.waitForIdle()
     }
     private fun settle() = compose.mainClock.advanceTimeBy(900)
-    /** Frames for [QuantumFrameSettle] to see smooth frames before the big map gathers. */
-    private fun openFrames() {
-        compose.mainClock.advanceTimeBy(48)
-        compose.waitForIdle()
-    }
     private fun tag(name: String) = compose.onNodeWithTag(name, useUnmergedTree = true)
     private fun animatedTime(time: String) =
         compose.onNode(hasText(time) and hasTestTag("quantum-label"), useUnmergedTree = true)

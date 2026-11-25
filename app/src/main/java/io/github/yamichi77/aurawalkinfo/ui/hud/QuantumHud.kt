@@ -1,11 +1,11 @@
 package io.github.yamichi77.aurawalkinfo.ui.hud
 
 import android.graphics.Matrix
-import android.os.SystemClock
-import android.util.Log
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.SystemClock
+import android.util.Log
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -41,13 +41,17 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal const val QuantumEffectsEnabled = true
 internal const val QuantumTransitionMillis = 500
 internal const val QuantumRimFlashMillis = 200
 private const val FadeStart = 0.7f
+private const val StartupMapLoadTimeoutMillis = 2_000L
 
-internal enum class QuantumEffect { Startup, Walk, OpenMap, CloseMap, Candidates }
+internal enum class QuantumEffect { Startup, Walk, OpenMap, CloseMap, ReturnMap, Candidates }
 
 /**
  * Decides when frames flow again after a heavy composition: [SettledFrames] frames in a row no longer
@@ -88,10 +92,13 @@ internal class QuantumAnimation(val effect: QuantumEffect, private val progress:
     val gathering by derivedStateOf { fraction in 0f..<1f }
 }
 
+internal fun QuantumAnimation.revealAlpha(effectsEnabled: Boolean) =
+    if (effectsEnabled) contentAlpha else fraction.coerceIn(0f, 1f)
+
 internal fun quantumContentAlpha(fraction: Float) =
     ((fraction - FadeStart) / (1f - FadeStart)).coerceIn(0f, 1f)
 
-internal fun quantumTransitionFrame(fraction: Float, outgoing: Boolean, gatherUntil: Float = FadeStart) = QuantumParticleFrame(
+internal fun quantumTransitionFrame(fraction: Float, gatherUntil: Float = FadeStart, outgoing: Boolean = false) = QuantumParticleFrame(
     convergence = if (outgoing) 1f else quantumConvergence(fraction / gatherUntil),
     dispersal = if (outgoing) 0.30f * quantumConvergence(fraction) else 0f,
     jitterPhase = fraction * QuantumTransitionMillis * 0.024f,
@@ -99,20 +106,23 @@ internal fun quantumTransitionFrame(fraction: Float, outgoing: Boolean, gatherUn
 
 internal data class HudQuantum(
     val left: QuantumAnimation?,
-    val map: QuantumAnimation?,
-) {
-    val miniMap: QuantumAnimation? get() = map?.takeUnless { it.effect == QuantumEffect.OpenMap }
-    val bigMap: QuantumAnimation? get() = map?.takeUnless { it.effect == QuantumEffect.Startup }
-}
+    val miniMap: QuantumAnimation?,
+    val onMapLoaded: (() -> Unit)? = null,
+)
 
 internal class HudQuantumStartup {
     var leftPlayed by mutableStateOf(false)
     var mapPlayed by mutableStateOf(false)
+    private val loaded = CompletableDeferred<Unit>()
+    val mapLoaded: Deferred<Unit> get() = loaded
+
+    fun onMapLoaded() {
+        loaded.complete(Unit)
+    }
 }
 
 private class QuantumHistory {
     var phase: WalkPhase? = null
-    var mapOpen: Boolean? = null
     var left: QuantumEffect? = null
     var map: QuantumEffect? = null
 }
@@ -131,9 +141,8 @@ internal fun rememberHudQuantum(
     val clusters = spec as? HudVisualSpec.Clusters
     val visible = ready && enabled && clusters != null && !locationDenied
     val phase = clusters?.phase.takeIf { visible && clusters?.showSafetyNotice == false }
-    val mapOpen = showBigMap.takeIf { visible }
     val startLeft = phase != null && !startup.leftPlayed
-    val startMap = mapOpen != null && !startup.mapPlayed
+    val startMap = visible && !startup.mapPlayed
     val left = when {
         startLeft -> QuantumEffect.Startup
         phase == null -> null
@@ -143,53 +152,62 @@ internal fun rememberHudQuantum(
         else -> null
     }
     val map = when {
-        mapOpen == null -> null
-        startMap && !mapOpen -> QuantumEffect.Startup
-        mapOpen == history.mapOpen -> history.map
-        history.mapOpen == null -> null
-        mapOpen -> QuantumEffect.OpenMap
-        else -> QuantumEffect.CloseMap
+        !visible || showBigMap -> null
+        startMap -> QuantumEffect.Startup
+        else -> history.map
     }
     SideEffect {
         if (startLeft) startup.leftPlayed = true
         if (startMap) startup.mapPlayed = true
         history.phase = phase
-        history.mapOpen = mapOpen
         history.left = left
         history.map = map
     }
-    return HudQuantum(
-        rememberQuantumAnimation(left, left == QuantumEffect.Walk && countdown?.finished == true),
-        rememberQuantumAnimation(map),
-    )
+    val leftAnimation = rememberQuantumAnimation(left, left == QuantumEffect.Walk && countdown?.finished == true,
+        startupPanel = "Left")
+    val waitForMap = map == QuantumEffect.Startup && clusters?.mapCenter != null && rememberHasMapsKey()
+    val mapAnimation = rememberQuantumAnimation(map, startupPanel = "MiniMap",
+        mapLoaded = startup.mapLoaded.takeIf { waitForMap })
+    return HudQuantum(leftAnimation, mapAnimation,
+        if (waitForMap && mapAnimation != null) startup::onMapLoaded else null)
 }
 
 @Composable
-internal fun rememberQuantumAnimation(effect: QuantumEffect?, waitForRipple: Boolean = false): QuantumAnimation? {
+internal fun rememberQuantumAnimation(
+    effect: QuantumEffect?,
+    waitForRipple: Boolean = false,
+    startupPanel: String = "",
+    mapLoaded: Deferred<Unit>? = null,
+): QuantumAnimation? {
     if (effect == null) return null
-    // Opening the big map builds the map view and its panels on the main thread (about 0.35 s on AURA,
-    // 0.45 s the first time). Wait for frames to flow again so the stall does not eat the gathering.
-    val settleFirst = effect == QuantumEffect.OpenMap
-    val progress = remember(effect) { mutableFloatStateOf(if (waitForRipple || settleFirst) -1f else 0f) }
+    val startup = effect == QuantumEffect.Startup
+    val progress = remember(effect) { mutableFloatStateOf(if (waitForRipple || startup) -1f else 0f) }
     var finished by remember(effect) { mutableStateOf(false) }
-    LaunchedEffect(effect, waitForRipple) {
-        if (!waitForRipple && !finished) {
-            if (settleFirst && progress.floatValue < 0f) {
-                val settle = QuantumFrameSettle()
-                while (!settle.onFrame(withFrameNanos { it })) Unit
-                Log.i("AuraQuantum", "${effect.name} settled waitMillis=${settle.waitedMillis}")
-            }
-            val duration = QuantumTransitionMillis + if (effect == QuantumEffect.OpenMap) QuantumRimFlashMillis else 0
-            var lastFrame = -1L
-            var longestFrame = 0L
+    var settled by remember(effect) { mutableStateOf(!startup) }
+    if (!settled) LaunchedEffect(mapLoaded) {
+        val start = SystemClock.uptimeMillis()
+        if (mapLoaded != null) withTimeoutOrNull(StartupMapLoadTimeoutMillis) { mapLoaded.await() }
+        val loadWait = SystemClock.uptimeMillis() - start
+        val settle = QuantumFrameSettle()
+        while (!settle.onFrame(withFrameNanos { it })) Unit
+        Log.i("AuraQuantum", "Startup$startupPanel settled waitMillis=${SystemClock.uptimeMillis() - start}" +
+            " mapWaitMillis=$loadWait settleMillis=${settle.waitedMillis}")
+        settled = true
+    }
+    LaunchedEffect(effect, waitForRipple, settled) {
+        if (settled && !waitForRipple && !finished) {
+            val duration = QuantumTransitionMillis
+            var previous = -1L
+            var longest = 0L
             animate(0f, duration.toFloat(), animationSpec = tween(duration, easing = LinearEasing)) { value, _ ->
                 progress.floatValue = value / QuantumTransitionMillis
-                val now = SystemClock.uptimeMillis()
-                if (lastFrame >= 0) longestFrame = maxOf(longestFrame, now - lastFrame)
-                lastFrame = now
+                if (startup) {
+                    val now = SystemClock.uptimeMillis()
+                    if (previous >= 0L) longest = maxOf(longest, now - previous)
+                    previous = now
+                }
             }
-            // The longest gap between animation frames shows whether the effect itself stuttered.
-            if (settleFirst) Log.i("AuraQuantum", "${effect.name} done longestFrameMillis=$longestFrame")
+            if (startup) Log.i("AuraQuantum", "Startup$startupPanel done longestFrameMillis=$longest")
             finished = true
         }
     }
@@ -199,25 +217,32 @@ internal fun rememberQuantumAnimation(effect: QuantumEffect?, waitForRipple: Boo
 @Composable
 internal fun QuantumMap(
     animation: QuantumAnimation?,
-    large: Boolean,
     modifier: Modifier,
-    content: @Composable (Modifier) -> Unit = {},
+    panelScale: Float,
+    effectsEnabled: Boolean,
+    large: Boolean,
+    content: @Composable (Modifier) -> Unit,
 ) {
-    val outgoing = large && animation?.effect == QuantumEffect.CloseMap
+    val outgoing = animation?.effect == QuantumEffect.CloseMap
     Box(modifier.clipToBounds()) {
-        if (!outgoing) {
-            content(Modifier.matchParentSize().graphicsLayer { alpha = animation?.contentAlpha ?: 1f })
-        }
-        if (animation?.gathering == true) {
+        // Keep the same AndroidView composed even while only the outgoing particles are drawn.
+        content(Modifier.matchParentSize().graphicsLayer {
+            alpha = when {
+                animation == null -> 1f
+                !outgoing -> animation.revealAlpha(effectsEnabled)
+                effectsEnabled -> 0f
+                else -> 1f - animation.revealAlpha(false)
+            }
+        })
+        if (effectsEnabled && animation?.gathering == true) {
             val particles = remember { quantumRingParticles(60) }
             Canvas(Modifier.matchParentSize().testTag(if (large) "quantum-bigmap" else "quantum-map")) {
-                val rim = size.minDimension * 0.5f - 1.dp.toPx()
-                // Leave room to disperse outward inside the existing circular XR panel.
+                val rim = size.minDimension * 0.5f - 1.dp.toPx() / panelScale
                 val radius = if (outgoing) rim * 0.84f else rim
-                drawQuantumParticles(particles, animation, center, radius, outgoing)
+                drawQuantumParticles(particles, animation, center, radius, pixelScale = panelScale)
             }
         }
-        if (large) QuantumRimFlash(animation, Modifier.matchParentSize(), "quantum-bigmap-rim")
+        if (large && effectsEnabled) QuantumRimFlash(animation, Modifier.matchParentSize(), "quantum-bigmap-rim")
     }
 }
 
@@ -265,7 +290,7 @@ internal fun quantumLabelModifier(
     return Modifier.drawWithContent {
         drawContent()
         val origin = Offset(left + glyph.offset.x * em, baseline() + glyph.offset.y * em)
-        drawQuantumParticles(glyph.particles, animation, origin, em, outgoing = false)
+        drawQuantumParticles(glyph.particles, animation, origin, em)
     }.graphicsLayer { alpha = animation.contentAlpha * contentOpacity }
 }
 
@@ -300,12 +325,12 @@ internal fun DrawScope.drawQuantumParticles(
     animation: QuantumAnimation,
     origin: Offset,
     scale: Float,
-    outgoing: Boolean,
+    pixelScale: Float = 1f,
 ) {
     val fraction = animation.fraction
     if (scale <= 0f || !animation.gathering) return
     val gatherUntil = if (animation.effect == QuantumEffect.OpenMap) 1f else FadeStart
-    val frame = quantumTransitionFrame(fraction, outgoing, gatherUntil)
+    val frame = quantumTransitionFrame(fraction, gatherUntil, outgoing = animation.effect == QuantumEffect.CloseMap)
     for ((index, particle) in particles.withIndex()) {
         val style = quantumParticleStyle(fraction, particle.radiusDp) ?: continue
         val color = when {
@@ -315,7 +340,7 @@ internal fun DrawScope.drawQuantumParticles(
         }
         drawCircle(
             color,
-            radius = style.radiusDp.dp.toPx(),
+            radius = style.radiusDp.dp.toPx() / pixelScale,
             center = origin + Offset(particle.x(frame) * scale, particle.y(frame) * scale),
             alpha = style.alpha,
         )

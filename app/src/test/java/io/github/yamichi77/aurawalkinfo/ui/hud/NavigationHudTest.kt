@@ -287,6 +287,9 @@ class NavigationHudTest {
         assertPreviewDismissed(f)
         text("目的地").assertIsDisplayed()
         assertTrue(f.map.isOpen)
+        large.performTouchInput { click() }
+        tap("map")
+        large.assertIsDisplayed()
     }
 
     @Test
